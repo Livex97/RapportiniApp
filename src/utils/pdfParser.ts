@@ -1,9 +1,10 @@
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
-import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
+import * as pdfjsLib from 'pdfjs-dist';
+// Use the modern worker loading for Vite
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import type { FormField } from './docxParser';
 
 // Set worker source using Vite's asset handling
-if (typeof window !== 'undefined' && 'Worker' in window) {
+if (typeof window !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 }
 
@@ -22,8 +23,9 @@ export async function extractTextFromPdf(file: File): Promise<PdfExtractionResul
 
     const loadingTask = pdfjsLib.getDocument({
         data: arrayBuffer,
-        standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`,
-        disableFontFace: true,
+        // Remove standardFontDataUrl dependency on unpkg as it's blocked by Tauri CSP
+        // and often not needed for digital DDTs. If needed, it should be bundled.
+        disableFontFace: false,
         useSystemFonts: true,
         isEvalSupported: false,
     });
@@ -92,7 +94,12 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
     // 1. Tipologia Documento (TIPO_DOCUMENTO)
     // Find lines that contain DDT or FATTURA near top
     for (const line of allLines) {
-        const ddtItem = line.items.find(i => i.str.includes('DDT VENDITA') || i.str.includes('FATTURA'));
+        const ddtItem = line.items.find(i =>
+            i.str.includes('DDT VENDITA') ||
+            i.str.includes('FATTURA') ||
+            i.str.includes('DOCUMENTO DI TRASPORTO') ||
+            i.str.includes('BOLLA')
+        );
         if (ddtItem) {
             extractions['tipo_documento'] = ddtItem.str;
             break;
@@ -242,7 +249,12 @@ function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
 
     result.pages.forEach((page) => {
         const pageLines = page.lines;
-        const tableHeaderIdx = pageLines.findIndex(l => l.items.some(i => i.str.includes('CODICE ARTICOLO') || i.str === 'CODICE'));
+        const tableHeaderIdx = pageLines.findIndex(l => l.items.some(i =>
+            i.str.includes('CODICE ARTICOLO') ||
+            i.str === 'CODICE' ||
+            i.str.includes('DESCRIZIONE BENI') ||
+            i.str.includes('ARTICOLI')
+        ));
 
         if (tableHeaderIdx === -1) return;
 

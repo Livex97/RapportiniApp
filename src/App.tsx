@@ -94,11 +94,18 @@ function App() {
 
       try {
         let extractedData: any = '';
-        if (file.type === 'application/pdf') {
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+        const isDocx = file.name.toLowerCase().endsWith('.docx');
+        const isDoc = file.name.toLowerCase().endsWith('.doc');
+
+        if (isPdf) {
+          console.log("Extracting from PDF:", file.name);
           extractedData = await extractTextFromPdf(file);
-        } else if (file.name.toLowerCase().endsWith('.docx')) {
+          console.log("PDF Extraction complete. Full text length:", extractedData.fullText.length);
+        } else if (isDocx) {
+          console.log("Extracting from DOCX:", file.name);
           extractedData = await extractTextFromDocx(file);
-        } else if (file.name.toLowerCase().endsWith('.doc')) {
+        } else if (isDoc) {
           alert("I file .doc non sono analizzabili automaticamente. Converti in PDF o .docx.");
         }
 
@@ -108,7 +115,7 @@ function App() {
         }
       } catch (err) {
         console.error("Error extracting text from source:", err);
-        alert("Errore nell'estrazione del testo dalla sorgente.");
+        alert("Errore nell'estrazione del testo dalla sorgente: " + (err instanceof Error ? err.message : String(err)));
       } finally {
         setIsProcessing(false);
       }
