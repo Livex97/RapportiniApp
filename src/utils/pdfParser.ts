@@ -2,17 +2,11 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 import type { FormField } from './docxParser';
 
-// Set worker source using a more robust method for production
+// Set worker source using the Vite-generated URL
 if (typeof window !== 'undefined') {
-    // Check if we are in a Tauri environment or standard web
-    const isTauri = (window as any).__TAURI_INTERNALS__ !== undefined;
-    if (isTauri) {
-        // In Tauri production,assets are often served from the root or a relative path
-        pdfjsLib.GlobalWorkerOptions.workerSrc = './assets/pdf.worker.mjs';
-    } else {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
-    }
+    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 }
+
 
 export interface PdfExtractionResult {
     fullText: string;
