@@ -2,9 +2,16 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 import type { FormField } from './docxParser';
 
-// Set worker source using Vite's asset handling
-if (typeof window !== 'undefined' && 'Worker' in window) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+// Set worker source using a more robust method for production
+if (typeof window !== 'undefined') {
+    // Check if we are in a Tauri environment or standard web
+    const isTauri = (window as any).__TAURI_INTERNALS__ !== undefined;
+    if (isTauri) {
+        // In Tauri production,assets are often served from the root or a relative path
+        pdfjsLib.GlobalWorkerOptions.workerSrc = './assets/pdf.worker.mjs';
+    } else {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+    }
 }
 
 export interface PdfExtractionResult {
@@ -37,33 +44,46 @@ export async function extractTextFromPdf(file: File): Promise<PdfExtractionResul
         const pages: PdfExtractionResult['pages'] = [];
 
         // Iterate through all pages
-        for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-            const page = await pdfDoc.getPage(pageNum);
-            const textContent = await page.getTextContent();
+    for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+        console.log(`[PDF Parser] Processing page ${pageNum}...`);
+        const page = await pdfDoc.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        
+        if (!textContent || !textContent.items) {
+            console.warn(`[PDF Parser] Page ${pageNum} returned no text content items`);
+            continue;
+        }
 
-            // Raw text
-            const pageText = textContent.items.map((item: any) => item.str).join(' ');
-            fullText += pageText + '\n';
+        console.log(`[PDF Parser] Page ${pageNum} items found:`, textContent.items.length);
+
+        // Raw text
+        const pageText = textContent.items
+            .map((item: any) => item.str || '')
+            .join(' ');
+        fullText += pageText + '\n';
 
             // Spatial grouping
             const linesMap = new Map<number, { str: string, x: number }[]>();
 
-            for (const item of textContent.items as any[]) {
-                const str = item.str.trim();
-                if (!str) continue;
+            for (const item of (textContent.items as any[])) {
+            if (!item || typeof item.str !== 'string') continue;
+            const str = item.str.trim();
+            if (!str) continue;
 
-                const x = Math.round(item.transform[4]);
-                const y = Math.round(item.transform[5]);
+            const x = Math.round(item.transform[4]);
+            const y = Math.round(item.transform[5]);
 
-                let targetY = y;
-                // Allow small y differences to be grouped together
-                for (const existingY of linesMap.keys()) {
+            let targetY = y;
+            // Allow small y differences to be grouped together
+            if (linesMap.size > 0) {
+                for (const existingY of Array.from(linesMap.keys())) {
                     if (Math.abs(existingY - y) <= 4) {
                         targetY = existingY;
                         break;
                     }
                 }
-
+            }
+          
                 if (!linesMap.has(targetY)) {
                     linesMap.set(targetY, []);
                 }
