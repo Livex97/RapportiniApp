@@ -1,0 +1,430 @@
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
+import type { FormField } from './docxParser';
+
+// Set worker source using Vite's asset handling
+if (typeof window !== 'undefined' && 'Worker' in window) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+}
+
+export interface PdfExtractionResult {
+    fullText: string;
+    pages: {
+        lines: { y: number; items: { str: string; x: number }[] }[];
+    }[];
+}
+
+/**
+ * Extracts raw text and spatial layout from a PDF file.
+ */
+export async function extractTextFromPdf(file: File): Promise<PdfExtractionResult> {
+    const arrayBuffer = await file.arrayBuffer();
+
+    const loadingTask = pdfjsLib.getDocument({
+        data: arrayBuffer,
+        standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`,
+        disableFontFace: true,
+        useSystemFonts: true,
+        isEvalSupported: false,
+    });
+    const pdfDoc = await loadingTask.promise;
+
+    let fullText = '';
+    const pages: PdfExtractionResult['pages'] = [];
+
+    // Iterate through all pages
+    for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+        const page = await pdfDoc.getPage(pageNum);
+        const textContent = await page.getTextContent();
+
+        // Raw text
+        const pageText = textContent.items.map((item: any) => item.str).join(' ');
+        fullText += pageText + '\n';
+
+        // Spatial grouping
+        const linesMap = new Map<number, { str: string, x: number }[]>();
+
+        for (const item of textContent.items as any[]) {
+            const str = item.str.trim();
+            if (!str) continue;
+
+            const x = Math.round(item.transform[4]);
+            const y = Math.round(item.transform[5]);
+
+            let targetY = y;
+            // Allow small y differences to be grouped together
+            for (const existingY of linesMap.keys()) {
+                if (Math.abs(existingY - y) <= 4) {
+                    targetY = existingY;
+                    break;
+                }
+            }
+
+            if (!linesMap.has(targetY)) {
+                linesMap.set(targetY, []);
+            }
+            linesMap.get(targetY)!.push({ str, x });
+        }
+
+        // Sort lines by Y descending (PDF coordinates usually have 0,0 at bottom-left)
+        const sortedY = Array.from(linesMap.keys()).sort((a, b) => b - a);
+        const lines = sortedY.map(y => {
+            const items = linesMap.get(y)!;
+            items.sort((a, b) => a.x - b.x); // Sort items left to right
+            return { y, items };
+        });
+
+        pages.push({ lines });
+    }
+
+    return { fullText, pages };
+}
+
+/**
+ * Extracts specific structures known from DDT documents using spatial coordinates.
+ */
+function extractDdtFields(result: PdfExtractionResult): Record<string, string> {
+    const extractions: Record<string, string> = {};
+    if (!result.pages.length) return extractions;
+
+    const allLines = result.pages.flatMap(p => p.lines);
+
+    // 1. Tipologia Documento (TIPO_DOCUMENTO)
+    // Find lines that contain DDT or FATTURA near top
+    for (const line of allLines) {
+        const ddtItem = line.items.find(i => i.str.includes('DDT VENDITA') || i.str.includes('FATTURA'));
+        if (ddtItem) {
+            extractions['tipo_documento'] = ddtItem.str;
+            break;
+        }
+    }
+
+    // 2. Destinazione: REPARTO_AMBULATORIO, INDIRIZZO, CAP, CITTA
+    const destIdx = allLines.findIndex(l => l.items.some(i => i.str.includes('LUOGO DI DESTINAZIONE')));
+    if (destIdx !== -1) {
+        const destItem = allLines[destIdx].items.find(i => i.str.includes('LUOGO DI DESTINAZIONE'));
+        const dx = destItem?.x || 0;
+
+        const destLines = [];
+        for (let i = destIdx + 1; i < destIdx + 7; i++) {
+            if (i >= allLines.length) break;
+            // Collect all items on this line that are inside the destination column (roughly from dx to 580)
+            const items = allLines[i].items.filter(it => it.x >= dx - 10 && it.x < dx + 230);
+            if (items.length > 0) {
+                const s = items.map(it => it.str).join(' ').trim();
+
+                // CRITICAL: Stop if we find bank info or specific footer labels
+                if (s.toLowerCase().includes('dati bancari') || s.toLowerCase().includes('partita iva') || s.toLowerCase().includes('telefono')) {
+                    break;
+                }
+
+                destLines.push(s);
+                // Stop if we find a line starting with 5 digits (CAP)
+                if (/^\d{5}/.test(s)) break;
+            }
+        }
+
+        if (destLines.length > 0) {
+            // Keep the full block in reparto_ambulatorio including CAP/City
+            extractions['reparto_ambulatorio'] = destLines.join(' - ');
+
+            const lastLine = destLines[destLines.length - 1];
+            const capCittaMatch = lastLine.match(/^(\d{5})\s*(.*)$/);
+
+            if (capCittaMatch) {
+                extractions['dest_cap'] = capCittaMatch[1];
+                extractions['dest_citta'] = capCittaMatch[2].replace(/\s*\([^)]+\)$/, '').trim();
+
+                // Indirizzo is typically the line before the CAP line
+                if (destLines.length >= 2) {
+                    extractions['dest_indirizzo'] = destLines[destLines.length - 2];
+                }
+            }
+        }
+    }
+
+    // 3. Spett.le: RAGIONE_SOCIALE, INDIRIZZO, CAP, CITTA
+    const spettIdx = allLines.findIndex(l => l.items.some(i => i.str.includes('SPETT.LE')));
+    if (spettIdx !== -1) {
+        const spettItem = allLines[spettIdx].items.find(i => i.str.includes('SPETT.LE'));
+        const sx = spettItem?.x || 0;
+
+        const clientLines = [];
+        for (let i = spettIdx + 1; i < spettIdx + 7; i++) {
+            if (i >= allLines.length) break;
+            // Collect all items for the right column (from sx to the right)
+            const items = allLines[i].items.filter(it => it.x >= sx - 10);
+            if (items.length > 0) {
+                const s = items.map(it => it.str).join(' ').trim();
+
+                // Stop at bank details/PIVA footer
+                if (s.toLowerCase().includes('dati bancari') || s.toLowerCase().includes('partita iva') || s.toLowerCase().includes('biotek')) {
+                    break;
+                }
+
+                clientLines.push(s);
+                // Stop at CAP line but include it first
+                if (/^\d{5}/.test(s)) break;
+            }
+        }
+
+        if (clientLines.length > 0) {
+            let capIdx = -1;
+            for (let i = 0; i < clientLines.length; i++) {
+                if (/^\d{5}/.test(clientLines[i])) {
+                    capIdx = i;
+                    break;
+                }
+            }
+
+            if (capIdx !== -1) {
+                const capCittaMatch = clientLines[capIdx].match(/^(\d{5})\s*(.*)$/);
+                if (capCittaMatch) {
+                    extractions['cap'] = capCittaMatch[1];
+                    extractions['citta'] = capCittaMatch[2].replace(/\s*\([^)]+\)$/, '').trim();
+                }
+
+                if (capIdx === 1) {
+                    extractions['ragione_sociale'] = clientLines[0];
+                } else if (capIdx === 2) {
+                    extractions['ragione_sociale'] = clientLines[0];
+                    extractions['indirizzo'] = clientLines[1];
+                } else if (capIdx >= 3) {
+                    // Indirizzo is line before CAP, everything else is Ragione Sociale
+                    extractions['ragione_sociale'] = clientLines.slice(0, capIdx - 1).join(' ');
+                    extractions['indirizzo'] = clientLines[capIdx - 1];
+                }
+            } else {
+                // Fallback if no CAP line found
+                extractions['ragione_sociale'] = clientLines[0];
+                if (clientLines.length >= 2) extractions['indirizzo'] = clientLines[1];
+            }
+        }
+    }
+
+    // 4. ID DOCUMENTO e DATA DOC (N_RICHIESTA)
+    const idDocIdx = allLines.findIndex(l => l.items.some(i => i.str.includes('ID DOCUMENTO')));
+    if (idDocIdx !== -1) {
+        const idDocItem = allLines[idDocIdx].items.find(i => i.str.includes('ID DOCUMENTO'));
+        const dataDocItem = allLines[idDocIdx].items.find(i => i.str.includes('DATA DOC'));
+
+        const idX = idDocItem?.x || 0;
+        const dataX = dataDocItem?.x || 0;
+
+        let idDocVal = '';
+        let dataDocVal = '';
+
+        for (let i = idDocIdx + 1; i < idDocIdx + 4; i++) {
+            if (i >= allLines.length) break;
+
+            if (!idDocVal) {
+                const item = allLines[i].items.find(it => Math.abs(it.x - idX) < 40);
+                if (item) idDocVal = item.str.trim();
+            }
+            if (!dataDocVal) {
+                const item = allLines[i].items.find(it => Math.abs(it.x - dataX) < 40);
+                if (item) dataDocVal = item.str.trim();
+            }
+        }
+
+        if (idDocVal && dataDocVal) {
+            extractions['n_richiesta'] = `${idDocVal} DEL ${dataDocVal}`;
+        } else if (idDocVal) {
+            extractions['n_richiesta'] = idDocVal;
+        } else if (dataDocVal) {
+            extractions['n_richiesta'] = dataDocVal;
+        }
+    }
+
+    // 5. Table Articoli (Multi-page support)
+    let artCount = 0;
+    let colX: Record<string, number> = {};
+
+    result.pages.forEach((page) => {
+        const pageLines = page.lines;
+        const tableHeaderIdx = pageLines.findIndex(l => l.items.some(i => i.str.includes('CODICE ARTICOLO') || i.str === 'CODICE'));
+
+        if (tableHeaderIdx === -1) return;
+
+        // Initialize or update column positions if not set
+        if (!colX['n']) {
+            const headerItems = pageLines[tableHeaderIdx].items;
+            for (const hi of headerItems) {
+                if (hi.str === 'N.' || hi.str === 'N') colX['n'] = hi.x;
+                else if (hi.str.includes('CODICE ARTICOLO') || hi.str === 'CODICE') colX['codice'] = hi.x;
+                else if (hi.str.includes('DESCRIZIONE')) colX['descrizione'] = hi.x;
+                else if (hi.str === 'UM') colX['um'] = hi.x;
+                else if (hi.str.includes("QUANTITA'") || hi.str === 'Q.TA') colX['quantita'] = hi.x;
+                else if (hi.str.includes('MATRICOLA') || hi.str === 'SN') colX['matricola'] = hi.x;
+            }
+
+            if (!colX['n']) colX['n'] = 25;
+            if (!colX['codice']) colX['codice'] = colX['n'] + 30;
+            if (!colX['descrizione']) colX['descrizione'] = colX['codice'] + 60;
+            if (!colX['um']) colX['um'] = colX['descrizione'] + 150;
+            if (!colX['quantita']) colX['quantita'] = colX['um'] + 30;
+            if (!colX['matricola']) colX['matricola'] = colX['quantita'] + 150;
+        }
+
+        const getColVal = (items: { str: string, x: number }[], expectedX: number, tolerance = 40, ignoreXs: number[] = []) => {
+            if (expectedX === undefined) return '';
+            const validItems = items.filter(it => {
+                for (const ix of ignoreXs) {
+                    if (ix !== undefined && Math.abs(it.x - ix) < Math.abs(it.x - expectedX)) {
+                        return false;
+                    }
+                }
+                return true;
+            });
+            if (!validItems.length) return '';
+
+            const closest = validItems.reduce((prev, curr) => {
+                return (Math.abs(curr.x - expectedX) < Math.abs(prev.x - expectedX) ? curr : prev);
+            }, { str: '', x: 9999 });
+            return Math.abs(closest.x - expectedX) < tolerance ? closest.str : '';
+        };
+
+        for (let i = tableHeaderIdx + 1; i < pageLines.length; i++) {
+            const line = pageLines[i];
+
+            // Stop parsing articles on this page if we hit footer markers
+            if (line.items.some(it => it.str.includes('CAUSALE DEL TRASPORTO') || it.str.includes('SEGUE'))) {
+                break;
+            }
+
+            // Check for new row start
+            const hasNum = line.items.some(it => Math.abs(it.x - colX['n']) < 25 && /^\d+$/.test(it.str));
+            const hasCode = line.items.some(it => Math.abs(it.x - colX['codice']) < 25);
+            const isNewRow = hasNum || hasCode;
+
+            const descStartX = colX['codice'] ? colX['codice'] + 30 : 80;
+            const descEndX = colX['um'] ? colX['um'] - 20 : (colX['quantita'] ? colX['quantita'] - 40 : 400);
+            const descItems = line.items.filter(it => it.x >= descStartX && it.x <= descEndX);
+            const desc = descItems.map(it => it.str).join(' ').trim();
+
+            if (isNewRow) {
+                artCount++;
+                const q = getColVal(line.items, colX['quantita'], 50, [colX['um']]);
+                const art = getColVal(line.items, colX['codice'], 50);
+                const sn = getColVal(line.items, colX['matricola'], 80);
+
+                if (q || art || desc) {
+                    extractions[`q_${artCount}`] = q.trim();
+                    extractions[`articolo_${artCount}`] = art.trim();
+                    extractions[`descrizione_${artCount}`] = desc.replace(/\s+/g, ' ').trim();
+                    extractions[`sn_${artCount}`] = (sn !== '/' && sn !== '' ? sn.trim() : '');
+                } else {
+                    artCount--;
+                }
+            } else if (artCount > 0 && desc && !line.items.some(it => it.str.includes('CAUSALE'))) {
+                const prevDesc = extractions[`descrizione_${artCount}`] || '';
+                const cleanLineDesc = desc.replace(/\s+/g, ' ').trim();
+                if (cleanLineDesc) {
+                    extractions[`descrizione_${artCount}`] = (prevDesc ? prevDesc + ' ' : '') + cleanLineDesc;
+                    extractions[`descrizione_${artCount}`] = extractions[`descrizione_${artCount}`].replace(/\s+/g, ' ').trim();
+                }
+            }
+        }
+    });
+
+    return extractions;
+}
+
+/**
+ * Attempts to automatically fill fields by fuzzy searching labels in the extracted text.
+ * Enhanced with specific format handling for spatial parsing results.
+ */
+export function autoFillFields(fields: FormField[], sourceData: string | PdfExtractionResult): FormField[] {
+    let normalizedText = '';
+    let spatialExtractions: Record<string, string> = {};
+
+    if (typeof sourceData === 'string') {
+        normalizedText = sourceData.replace(/\s+/g, ' ');
+    } else {
+        normalizedText = sourceData.fullText.replace(/\s+/g, ' ');
+        spatialExtractions = extractDdtFields(sourceData);
+    }
+
+    const extractions: Record<string, string> = { ...spatialExtractions };
+
+    // Regex fallbacks (only populate if not already found via spatial layout)
+    if (!extractions['document_number']) {
+        const docRefMatch = normalizedText.match(/(?:BO|DDT|FATTURA|N° DOCUMENTO)\s*(?:N\.)?\s*(\d+[A-Z]?)\s*(?:del|del:|DATA DOC|DATA DOCUMENTO)\s*(\d{2}\/\d{2}\/\d{4})/i);
+        if (docRefMatch) {
+            extractions['document_number'] = docRefMatch[1];
+            extractions['document_date'] = docRefMatch[2];
+        }
+    }
+
+    if (!extractions['cliente'] && !extractions['ragione_sociale']) {
+        const customerMatch = normalizedText.match(/(?:SPETT\.LE|CLIENTE|DESTINATARIO)\s+([A-Z0-9\s.,&/]+?)(?:\s{2,}|PARTITA IVA|PIVA|C\.CLIENTE|DDT|FATTURA|\n|$)/i);
+        if (customerMatch) extractions['cliente'] = customerMatch[1].trim();
+    }
+
+    const resultFields = fields.map(field => {
+        const label = field.label.toLowerCase().trim();
+
+        // 1. Direct Spatial Map matching by placeholder
+        if (spatialExtractions[label]) return { ...field, value: spatialExtractions[label] };
+
+        // 2. Specialized Aliases
+        if (label.includes('cliente') || label.includes('ragione_sociale')) {
+            if (extractions['ragione_sociale']) return { ...field, value: extractions['ragione_sociale'] };
+        }
+        if (label.includes('indirizzo')) {
+            if (extractions['indirizzo']) return { ...field, value: extractions['indirizzo'] };
+            if (extractions['dest_indirizzo']) return { ...field, value: extractions['dest_indirizzo'] };
+        }
+        if (label.includes('cap')) {
+            if (extractions['cap']) return { ...field, value: extractions['cap'] };
+            if (extractions['dest_cap']) return { ...field, value: extractions['dest_cap'] };
+        }
+        if (label.includes('citta') || label.includes('città')) {
+            if (extractions['citta']) return { ...field, value: extractions['citta'] };
+            if (extractions['dest_citta']) return { ...field, value: extractions['dest_citta'] };
+        }
+
+        if (label.includes('destinazione')) {
+            if (extractions['reparto_ambulatorio']) return { ...field, value: extractions['reparto_ambulatorio'] };
+        }
+
+        if ((label.includes('documento') || label.includes('ddt') || label.includes('fattura')) && !label.includes('data')) {
+            if (extractions['document_number']) return { ...field, value: extractions['document_number'] };
+        }
+        if (label.includes('data') && extractions['document_date']) return { ...field, value: extractions['document_date'] };
+
+        // 3. Generic fuzzy matching
+        const escapedLabel = field.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const genericRegex = new RegExp(`(?:${escapedLabel})\\s*:?\\s*([^\\n\\r]{1,100}?)(?:  |$)`, 'i');
+        const match = normalizedText.match(genericRegex);
+
+        if (match && match[1]) {
+            return {
+                ...field,
+                value: match[1].trim()
+            };
+        }
+
+        return field;
+    });
+
+    // Append any dynamically extracted table items that aren't already mapped
+    const maxExtractedItem = Object.keys(extractions).reduce((max, key) => {
+        const m = key.match(/_(?!.*_)(\d+)$/);
+        if (m) return Math.max(max, parseInt(m[1]));
+        return max;
+    }, 0);
+
+    for (let i = 1; i <= maxExtractedItem; i++) {
+        if (!resultFields.some(f => f.id === `q_${i}` || f.label.toLowerCase() === `q_${i}`)) {
+            if (extractions[`q_${i}`] || extractions[`articolo_${i}`] || extractions[`descrizione_${i}`]) {
+                resultFields.push({ id: `q_${i}`, label: `Q_${i}`, value: extractions[`q_${i}`] || '', type: 'text' });
+                resultFields.push({ id: `articolo_${i}`, label: `ARTICOLO_${i}`, value: extractions[`articolo_${i}`] || '', type: 'text' });
+                resultFields.push({ id: `descrizione_${i}`, label: `DESCRIZIONE_${i}`, value: extractions[`descrizione_${i}`] || '', type: 'text' });
+                resultFields.push({ id: `sn_${i}`, label: `SN_${i}`, value: extractions[`sn_${i}`] || '', type: 'text' });
+            }
+        }
+    }
+
+    return resultFields;
+}

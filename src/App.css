@@ -1,0 +1,61 @@
+/* Main App styles */
+.preview-page-container {
+    background-color: white;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    margin-bottom: 2rem;
+    overflow: hidden;
+}
+
+/* Customize docx-preview output */
+.docx-render-target {
+    padding: 0 !important;
+    background: white;
+}
+
+.docx-render-target section {
+    padding: 20mm !important; /* Standard Word margins */
+    box-shadow: none !important;
+    margin: 0 !important;
+}
+
+/* Interactive Input Styles */
+.docx-render-target input {
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    color: #2563eb; /* primary-600 */
+    border-bottom: 2px solid #93c5fd; /* primary-300 */
+    background-color: #eff6ff; /* primary-50 */
+    padding: 0 0.25rem;
+    transition: all 0.2s;
+}
+
+.docx-render-target input:focus {
+    background-color: #dbeafe; /* primary-100 */
+    border-color: #2563eb;
+    outline: none;
+}
+
+.docx-render-target input::placeholder {
+    color: #94a3b8;
+    opacity: 0.5;
+}
+
+/* Scrollbar styling */
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;
+}
+.scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.5s ease forwards;
+}
