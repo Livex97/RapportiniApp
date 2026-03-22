@@ -33,3 +33,7 @@ parsePdf.js
 
 # Tauri signing keys
 .tauri/
+
+# Scripts
+bump-version.cjs
+push-release.cjs
