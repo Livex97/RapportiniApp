@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, Sun, Moon, Plus, Trash2, Brain, Database, Bell, RefreshCw, Layout, Save, RotateCcw, Server, X } from 'lucide-react';
+import { FileUp, FileText, Download, CheckCircle, ChevronRight, Settings, Home as HomeIcon, Upload, ArrowLeft, FileIcon, ChevronDown, ChevronUp, User, Package, Sun, Moon, Plus, Trash2, Brain, Database, Bell, RefreshCw, Layout, Save, RotateCcw, Server, X, FileSpreadsheet } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import { open, save, ask, message } from '@tauri-apps/plugin-dialog';
 import { readFile, writeTextFile } from '@tauri-apps/plugin-fs';
@@ -15,9 +15,10 @@ import { sendAppNotification } from './utils/notifications';
 import { DEFAULT_SYSTEM_PROMPT } from './utils/ollama';
 import AIExtraction from './AIExtraction';
 import SterlinkManagerPage from './SterlinkManagerPage';
+import PandettaManager from './PandettaManager';
 import './App.css';
 
-type View = 'home' | 'settings' | 'form' | 'download' | 'ai-extraction' | 'sterlink-manager';
+type View = 'home' | 'settings' | 'form' | 'download' | 'ai-extraction' | 'sterlink-manager' | 'pandetta-manager';
 
 function AutoResizeTextarea({ value, onChange, placeholder, className, onKeyDown }: any) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -975,16 +976,27 @@ function App() {
                 <Database className="w-6 h-6" />
               </button>
                <button
-                 onClick={() => navigateView('settings')}
-                 className={`p-2 transition-colors rounded-lg ${
-                   currentView === 'settings'
-                     ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
-                     : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
-                 }`}
-                 title="Impostazioni Template"
-               >
-                 <Settings className="w-6 h-6" />
-               </button>
+                onClick={() => navigateView('pandetta-manager')}
+                className={`p-2 transition-colors rounded-lg ${
+                  currentView === 'pandetta-manager'
+                    ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
+                    : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
+                }`}
+                title="Gestione Pandetta Assistenze"
+              >
+                <FileSpreadsheet className="w-6 h-6" />
+              </button>
+                <button
+                  onClick={() => navigateView('settings')}
+                  className={`p-2 transition-colors rounded-lg ${
+                    currentView === 'settings'
+                      ? 'text-primary-600 bg-primary-50 dark:bg-primary-900/30'
+                      : 'text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700'
+                  }`}
+                  title="Impostazioni Template"
+                >
+                  <Settings className="w-6 h-6" />
+                </button>
              <button
                onClick={toggleTheme}
                className="p-2 text-neutral-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-neutral-700 rounded-lg transition-colors"
@@ -2226,12 +2238,19 @@ function App() {
            <AIExtraction onBack={handleGoHome} theme={theme} />
          )}
 
-         {/* --- VIEW: STERLINK MANAGER --- */}
-         {currentView === 'sterlink-manager' && (
-           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-             <SterlinkManagerPage />
-           </div>
-         )}
+          {/* --- VIEW: STERLINK MANAGER --- */}
+          {currentView === 'sterlink-manager' && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <SterlinkManagerPage />
+            </div>
+          )}
+
+          {/* --- VIEW: PANDETTA MANAGER --- */}
+          {currentView === 'pandetta-manager' && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full">
+              <PandettaManager />
+            </div>
+          )}
        </main>
 
     </div>

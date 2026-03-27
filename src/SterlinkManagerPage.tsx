@@ -47,6 +47,12 @@ interface DataRow {
 
 type Page = 'table' | 'import' | 'settings';
 
+function isMultiEntryValue(value: any): boolean {
+  if (value === null || value === undefined || value === '') return false;
+  const strVal = String(value);
+  return /^\d+\.\s/.test(strVal) && (strVal.includes('\n') || strVal.includes('\\n'));
+}
+
 function showToast(msg: string, type: 'success' | 'error' | 'info' = 'info') {
   const container = document.getElementById('toast-container');
   if (!container) return;
@@ -560,13 +566,130 @@ export default function SterlinkManagerPage() {
           }
           return (
             <div key={idx} className="entry-slot" data-idx={Math.min(idx, 4)}>
-              <span className="entry-index">{e.idx + 1}</span>
               <span className={valClass} dangerouslySetInnerHTML={{ __html: text }} />
             </div>
           );
         })}
       </div>
     );
+  };
+
+  function parseMultiEntry(val: string): { idx: number; value: string }[] {
+    if (!val) return [];
+    const normalized = val.replace(/\\n/g, '\n');
+    const lines = normalized.split('\n').map(l => l.trim()).filter(Boolean);
+    const entries: { idx: number; value: string }[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^(\d+)\.\s*(.*)$/);
+      if (m) {
+        entries.push({ idx: parseInt(m[1], 10) - 1, value: m[2].trim() });
+      } else if (entries.length) {
+        entries[entries.length - 1].value += ' ' + lines[i];
+      }
+    }
+    return entries;
+  }
+
+  function formatMultiEntry(entries: { idx: number; value: string }[]): string {
+    return entries.map((e, i) => `${i + 1}. ${e.value}`).join('\n');
+  }
+
+  interface MultiEntryEditorProps {
+    value: string;
+    rowId: number;
+    colName: string;
+    onAddEntry: (rowId: number, sourceCol: string, newIndex: number) => void;
+  }
+
+  function MultiEntryEditor({ value, rowId, colName, onAddEntry }: MultiEntryEditorProps) {
+    const [entries, setEntries] = useState<{ idx: number; value: string }[]>(() => parseMultiEntry(value));
+    const firstInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+      if (firstInputRef.current) {
+        firstInputRef.current.focus();
+      }
+    }, []);
+
+    const updateEntry = (index: number, newValue: string) => {
+      setEntries(prev => {
+        const next = [...prev];
+        next[index] = { ...next[index], value: newValue };
+        return next;
+      });
+    };
+
+    const addEntry = () => {
+      const newIndex = entries.length;
+      setEntries(prev => [...prev, { idx: newIndex, value: '' }]);
+      onAddEntry(rowId, colName, newIndex);
+    };
+
+    const removeEntry = (index: number) => {
+      setEntries(prev => prev.filter((_, i) => i !== index));
+    };
+
+    const formattedValue = formatMultiEntry(entries);
+
+    return (
+      <div className="multi-entry-editor">
+        <div className="entries-list">
+          {entries.map((entry, idx) => (
+            <div key={idx} className="entry-edit-slot" data-idx={Math.min(idx, 4)}>
+              <span className="entry-number">{idx + 1}</span>
+              <input
+                ref={idx === 0 ? firstInputRef : null}
+                type="text"
+                className="entry-input"
+                value={entry.value}
+                onChange={e => updateEntry(idx, e.target.value)}
+                placeholder="Inserisci testo..."
+              />
+              <button
+                type="button"
+                className="entry-delete"
+                onClick={() => removeEntry(idx)}
+                title="Rimuovi voce"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+        <button type="button" className="add-entry-btn" onClick={addEntry}>
+          + Aggiungi voce
+        </button>
+        <textarea
+          style={{ display: 'none' }}
+          data-id={rowId}
+          data-col={colName}
+          value={formattedValue}
+          readOnly
+        />
+      </div>
+    );
+  }
+
+  const handleAddEntryToAll = (rowId: number, sourceCol: string, newIndex: number) => {
+    setRows(prevRows => prevRows.map(row => {
+      if (row._id !== rowId) return row;
+      const newRow = { ...row };
+      headers.forEach(h => {
+        if (h === sourceCol) return;
+        const val = row[h];
+        if (isMultiEntryValue(val)) {
+          const entries = parseMultiEntry(String(val));
+          const desiredLength = newIndex + 1;
+          if (entries.length < desiredLength) {
+            while (entries.length < desiredLength) {
+              entries.push({ idx: entries.length, value: '' });
+            }
+            newRow[h] = formatMultiEntry(entries);
+          }
+        }
+      });
+      return newRow;
+    }));
   };
 
   const displayedRows = getFilteredSortedRows();
@@ -620,24 +743,127 @@ export default function SterlinkManagerPage() {
            overflow-wrap: anywhere;
          }
 
-         .multi-entries { display: flex; flex-direction: column; gap: 4px; }
-         .entry-slot { display: flex; align-items: flex-start; gap: 6px; padding: 4px 8px; border-radius: 6px; border-left: 3px solid; background: rgba(0,0,0,0.02); }
-         .entry-slot[data-idx="0"] { border-color: #3b82f6; background: rgba(59, 130, 246, 0.05); }
-         .entry-slot[data-idx="1"] { border-color: #10b981; background: rgba(16, 185, 129, 0.05); }
-         .entry-slot[data-idx="2"] { border-color: #f59e0b; background: rgba(245, 158, 11, 0.05); }
-         .entry-slot[data-idx="3"] { border-color: #a855f7; background: rgba(168, 85, 247, 0.05); }
-         .entry-slot[data-idx="4"] { border-color: #ef4444; background: rgba(239, 68, 68, 0.05); }
-         .entry-index { width: 20px; height: 20px; border-radius: 50%; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; background: currentColor; color: white; flex-shrink: 0; }
-         .entry-value { font-size: 13px; line-height: 1.5; word-break: break-word; color: #374151; }
-         .entry-value.is-na { color: #9ca3af; font-style: italic; }
-         .entry-value.is-date { color: #d97706; font-weight: 500; }
+          .multi-entries { display: flex; flex-direction: column; gap: 4px; }
+          .entry-slot {
+            display: flex;
+            align-items: flex-start;
+            gap: 0;
+            padding: 4px 8px 4px 16px;
+            border-radius: 6px;
+            border-left: 2px solid;
+            background: rgba(0,0,0,0.02);
+            position: relative;
+          }
+          .entry-slot[data-idx="0"] { border-left-color: #3b82f6; background: rgba(59, 130, 246, 0.05); --dot-color: #3b82f6; }
+          .entry-slot[data-idx="1"] { border-left-color: #10b981; background: rgba(16, 185, 129, 0.05); --dot-color: #10b981; }
+          .entry-slot[data-idx="2"] { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.05); --dot-color: #f59e0b; }
+          .entry-slot[data-idx="3"] { border-left-color: #a855f7; background: rgba(168, 85, 247, 0.05); --dot-color: #a855f7; }
+          .entry-slot[data-idx="4"] { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.05); --dot-color: #ef4444; }
+          .entry-slot::before {
+            content: '';
+            position: absolute;
+            left: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--dot-color);
+            flex-shrink: 0;
+          }
+          .entry-value { font-size: 13px; line-height: 1.5; word-break: break-word; color: #374151; }
+          .entry-value.is-na { color: #9ca3af; font-style: italic; }
+          .entry-value.is-date { color: #d97706; font-weight: 500; }
+
+          .multi-entry-editor { display: flex; flex-direction: column; gap: 8px; }
+          .entries-list { display: flex; flex-direction: column; gap: 4px; }
+          .entry-edit-slot {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            border-left: 2px solid;
+            background: rgba(0,0,0,0.02);
+            position: relative;
+          }
+          .entry-edit-slot[data-idx="0"] { border-left-color: #3b82f6; background: rgba(59, 130, 246, 0.05); }
+          .entry-edit-slot[data-idx="1"] { border-left-color: #10b981; background: rgba(16, 185, 129, 0.05); }
+          .entry-edit-slot[data-idx="2"] { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.05); }
+          .entry-edit-slot[data-idx="3"] { border-left-color: #a855f7; background: rgba(168, 85, 247, 0.05); }
+          .entry-edit-slot[data-idx="4"] { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.05); }
+          .entry-number {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            font-size: 10px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6b7280;
+            flex-shrink: 0;
+          }
+          .entry-edit-slot[data-idx="0"] .entry-number { color: #3b82f6; }
+          .entry-edit-slot[data-idx="1"] .entry-number { color: #10b981; }
+          .entry-edit-slot[data-idx="2"] .entry-number { color: #f59e0b; }
+          .entry-edit-slot[data-idx="3"] .entry-number { color: #a855f7; }
+          .entry-edit-slot[data-idx="4"] .entry-number { color: #ef4444; }
+          .entry-input {
+            flex: 1;
+            min-width: 0;
+            border: none;
+            background: transparent;
+            font-size: 13px;
+            line-height: 1.5;
+            color: #374151;
+            padding: 2px 0;
+            outline: none;
+          }
+          .entry-delete {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: none;
+            background: transparent;
+            color: #9ca3af;
+            font-size: 16px;
+            line-height: 1;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+          }
+          .entry-delete:hover { background: #fee2e2; color: #ef4444; }
+          .add-entry-btn {
+            align-self: flex-start;
+            padding: 6px 12px;
+            border: 1px dashed #9ca3af;
+            border-radius: 6px;
+            background: transparent;
+            color: #6b7280;
+            font-size: 12px;
+            cursor: pointer;
+            margin-top: 4px;
+          }
+          .add-entry-btn:hover {
+            border-color: #3b82f6;
+            color: #3b82f6;
+            background: rgba(59, 130, 246, 0.05);
+          }
 
          .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 16px; border-radius: 8px; font-size: 14px; color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.15); animation: slideIn 0.2s ease; z-index: 9999; }
          .toast.success { background: #10b981; }
          .toast.error { background: #ef4444; }
          .toast.info { background: #3b82f6; }
-         @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-       `}</style>
+          @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+          .entry-edit-slot[data-idx="0"] .entry-number { color: #3b82f6; }
+          .entry-edit-slot[data-idx="1"] .entry-number { color: #10b981; }
+          .entry-edit-slot[data-idx="2"] .entry-number { color: #f59e0b; }
+          .entry-edit-slot[data-idx="3"] .entry-number { color: #a855f7; }
+          .entry-edit-slot[data-idx="4"] .entry-number { color: #ef4444; }
+        `}</style>
 
       {/* Top Navigation Tabs */}
       <div className="flex gap-2 mb-6 border-b border-neutral-200 dark:border-neutral-700 pb-4">
@@ -805,23 +1031,39 @@ export default function SterlinkManagerPage() {
                             const isEditing = editingRowId === row._id;
                             return (
                               <td key={h} className="px-4 py-3 align-top">
-                                {isEditing ? (
-                                  <textarea
-                                    className="w-full min-h-[60px] p-2.5 bg-white dark:bg-neutral-900 border-2 border-primary-300 dark:border-primary-600 rounded-lg text-sm dark:text-white resize-y focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all font-sans"
-                                    data-col={h}
-                                    defaultValue={row[h] ?? ''}
-                                    onInput={(e) => {
-                                      const target = e.target as HTMLTextAreaElement;
-                                      target.style.height = 'auto';
-                                      target.style.height = target.scrollHeight + 'px';
-                                    }}
-                                    autoFocus
-                                  />
-                                ) : (
-                                  <div className="text-sm text-neutral-800 dark:text-neutral-200 min-h-[20px]">
-                                    {renderCellValue(row[h], h, filter)}
-                                  </div>
-                                )}
+{isEditing ? (
+  (() => {
+    const val = row[h];
+    if (isMultiEntryValue(val)) {
+      return (
+        <MultiEntryEditor
+          key={`multi-${row._id}-${h}-${String(val)}`}
+          value={String(val)}
+          rowId={row._id}
+          colName={h}
+          onAddEntry={handleAddEntryToAll}
+        />
+      );
+    }
+    return (
+      <textarea
+        className="cell-editor"
+        data-col={h}
+        defaultValue={row[h] ?? ''}
+        onInput={(e) => {
+          const target = e.target as HTMLTextAreaElement;
+          target.style.height = 'auto';
+          target.style.height = target.scrollHeight + 'px';
+        }}
+        autoFocus
+      />
+    );
+  })()
+) : (
+  <div className="text-sm text-neutral-800 dark:text-neutral-200 min-h-[20px]">
+    {renderCellValue(row[h], h, filter)}
+  </div>
+)}
                               </td>
                             );
                           })}
