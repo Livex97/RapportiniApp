@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { FileSpreadsheet, Upload, Download, Search, X, Plus, CheckCircle, AlertCircle, Clock, Edit2, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
+import { FileSpreadsheet, Upload, Download, Search, X, Plus, CheckCircle, AlertCircle, Clock, Edit2, Trash2, Loader2 } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { save, open, ask } from '@tauri-apps/plugin-dialog';
@@ -88,6 +88,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
   const [originalFileHash, setOriginalFileHash] = useState<string | null>(null);
   const [showExternalUpdateBanner, setShowExternalUpdateBanner] = useState(false);
   const [lastNotifiedExternalHash, setLastNotifiedExternalHash] = useState<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const AUTO_REFRESH_INTERVAL = 8000; // ms
 
   // Calcola hash semplice di un file per rilevare modifiche
@@ -125,6 +126,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
 
         if (jsonData && jsonData.length > 0) {
           setRows(jsonData);
+          setHasUnsavedChanges(false);
           buildTecnicoColorMap(jsonData);
 
           const savedCols = await getSetting<string[]>('pandetta_dynamic_cols', []);
@@ -457,6 +459,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
     }
 
     setRows(newRows);
+    setHasUnsavedChanges(false);
     buildTecnicoColorMap(newRows);
 
     // Salva i metadati
@@ -543,6 +546,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
 
       setIsSaving(false);
       toast(result || 'Sincronizzazione completata!', 'success');
+      setHasUnsavedChanges(false);
     } catch (err: any) {
       console.error('Export error:', err);
       setIsSaving(false);
@@ -606,16 +610,25 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
       toast('Riga aggiornata', 'success');
     }
     setModalOpen(false);
+    setHasUnsavedChanges(true);
   };
 
-  const deleteRow = (idx: number) => {
-    if (!confirm('Eliminare definitivamente questa riga?')) return;
+  const deleteRow = async (idx: number, closeModalAfter = false) => {
+    const confirmed = await ask('Eliminare definitivamente questa riga?', {
+      title: 'Conferma eliminazione',
+      kind: 'warning'
+    });
+    if (!confirmed) return;
     setRows(prev => {
       const updated = prev.filter((_, i) => i !== idx);
       saveExcelDataJson('pandetta', updated);
       return updated;
     });
+    setHasUnsavedChanges(true);
     toast('Riga eliminata', 'info');
+    if (closeModalAfter) {
+      setModalOpen(false);
+    }
   };
 
   const openEdit = (idx: number) => {
@@ -751,20 +764,19 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
         </div>
       )}
 
-      {/* Top Bar */}
-      <div className="flex items-center gap-4 p-4 bg-white dark:bg-neutral-800 rounded-xl shadow-sm border border-neutral-200 dark:border-neutral-700">
-        <button
-          onClick={() => setView('upload')}
-          className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors text-neutral-500"
-        >
-          <ArrowLeft className="w-6 h-6" />
-        </button>
-        <div className="flex items-center gap-2">
+       {/* Top Bar */}
+       <div className="flex items-center gap-4 p-4 bg-white dark:bg-neutral-800 rounded-xl shadow-sm border border-neutral-200 dark:border-neutral-700">
+         <div className="flex items-center gap-2">
           <FileSpreadsheet className="w-6 h-6 text-blue-600" />
-          <span className="font-bold text-lg text-neutral-900 dark:text-white">Pandetta</span>
           <span className="px-2 py-1 text-xs font-mono bg-neutral-100 dark:bg-neutral-700 rounded text-neutral-600 dark:text-neutral-300">
             {fileName}
           </span>
+          {hasUnsavedChanges && (
+            <span className="px-2 py-0.5 text-xs font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-400 rounded-full flex items-center gap-1">
+              <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></span>
+              Modifiche non salvate
+            </span>
+          )}
         </div>
 
         <div className="flex-1" />
@@ -854,6 +866,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
             setFilter('all');
             setSearchTerm('');
             setView('upload');
+            setHasUnsavedChanges(false);
 
             try {
               // Cancella cache locale
@@ -1142,10 +1155,10 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
             <div className="px-8 py-6 border-t border-neutral-100 dark:border-neutral-700 flex justify-between items-center bg-neutral-50/50 dark:bg-neutral-800/50">
               <div>
                 {!isNew && (
-                  <button
-                    onClick={() => deleteRow(editingIdx!)}
-                    className="flex items-center gap-2 px-5 py-3 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-2xl transition-all font-bold text-sm"
-                  >
+                   <button
+                     onClick={() => deleteRow(editingIdx!, true)}
+                     className="flex items-center gap-2 px-5 py-3 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-2xl transition-all font-bold text-sm"
+                   >
                     <Trash2 className="w-4 h-4" />
                     Elimina Record
                   </button>
