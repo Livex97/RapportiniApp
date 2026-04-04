@@ -2386,7 +2386,12 @@ function App() {
                 onFileSelected={(name: string, path: string | null) => {
                   setPandettaFileName(name);
                   setPandettaFilePath(path);
-                }} 
+                }}
+                onResetPersistent={async () => {
+                  await clearExcelFile('pandetta');
+                  setPandettaFileName(null);
+                  setPandettaFilePath(null);
+                }}
               />
             </div>
           )}
