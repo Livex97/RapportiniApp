@@ -101,8 +101,8 @@ function MultiEntryEditor({ value, onChange }: MultiEntryEditorProps) {
           </div>
         ))}
       </div>
-      <button 
-        type="button" 
+      <button
+        type="button"
         className="flex items-center gap-2 px-3 py-1.5 w-fit text-xs font-bold text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-lg transition-all uppercase tracking-wider"
         onClick={addEntry}
       >
@@ -247,7 +247,7 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
               toast('Il file originale è stato modificato esternamente', 'info');
             }
           }
-        } catch (err) {}
+        } catch (err) { }
       })();
     }, AUTO_REFRESH_INTERVAL);
     return () => {
@@ -493,12 +493,14 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
     setHasUnsavedChanges(true);
   };
 
-  const deleteRow = async (idx: number) => {
-    const confirmed = await ask('Eliminare definitivamente questa riga?', {
-      title: 'Conferma eliminazione',
-      kind: 'warning'
-    });
-    if (!confirmed) return;
+  const deleteRow = async (idx: number, skipConfirmation = false) => {
+    if (!skipConfirmation) {
+      const confirmed = await ask('Eliminare definitivamente questa riga?', {
+        title: 'Conferma eliminazione',
+        kind: 'warning'
+      });
+      if (!confirmed) return;
+    }
     setRows(prev => {
       const updated = prev.filter((_, i) => i !== idx);
       saveExcelDataJson('sterlink', updated);
@@ -531,7 +533,7 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
   const renderCellValue = (value: any, header: string) => {
     if (value === null || value === undefined || value === '') return <span className="text-neutral-400 italic">—</span>;
     const strVal = String(value);
-    
+
     // MultiEntry logic for Sterlink
     if (isMultiEntryValue(strVal)) {
       const entries = parseMultiEntry(strVal);
@@ -620,22 +622,33 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
       {/* Header Fisso */}
       <div className="sticky top-16 z-20 flex flex-col gap-4 pt-4 pb-6 bg-transparent -mx-4 px-4 -mt-8">
         <div className="flex items-center gap-4 p-4 bg-white/80 dark:bg-neutral-800/80 rounded-2xl shadow-sm border border-neutral-200/50 dark:border-neutral-700/50 backdrop-blur-md">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <FileSpreadsheet className="w-6 h-6 text-blue-600" />
-            <span className="px-2 py-1 text-xs font-mono bg-neutral-100 dark:bg-neutral-700/50 rounded text-neutral-600 dark:text-neutral-300">{fileName}</span>
+            {!searchTerm && (
+              <span className="px-2 py-1 text-xs font-mono bg-neutral-100 dark:bg-neutral-700/50 rounded text-neutral-600 dark:text-neutral-300 transition-all duration-300">{fileName}</span>
+            )}
           </div>
-          <div className="flex-1 relative max-w-md ml-4">
+          <div className="flex-1 relative min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
             <input
               type="text"
               placeholder="Cerca macchine, seriali, versioni..."
-              className="w-full pl-10 pr-4 py-2 bg-neutral-100 dark:bg-neutral-700/50 border-none rounded-xl text-sm focus:ring-2 focus:ring-primary-500"
+              className="w-full pl-10 pr-10 py-2 bg-neutral-100 dark:bg-neutral-700/50 border-none rounded-xl text-sm focus:ring-2 focus:ring-primary-500 transition-all duration-300"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
             />
+            {searchTerm && (
+              <button
+                type="button"
+                className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 hover:text-neutral-600 transition-all duration-300"
+                onClick={() => setSearchTerm('')}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-3 ml-auto">
-             <button
+            <button
               onClick={openNewRow}
               className="flex items-center gap-2 px-4 py-2 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-bold rounded-xl hover:scale-105 transition-transform text-sm"
             >
@@ -645,7 +658,7 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
               onClick={exportXlsx}
               disabled={isSaving}
               className={`flex items-center gap-2 px-6 py-2 bg-primary-600 text-white font-bold rounded-xl shadow-lg shadow-primary-500/20 transition-all text-sm
-                ${isSaving ? 'opacity-70 cursor-not-allowed' : 'hover:bg-primary-700 hover:scale-105 active:scale-95'}`}
+                 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'hover:bg-primary-700 hover:scale-105 active:scale-95'}`}
             >
               {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               {isSaving ? 'Salvataggio...' : 'Sincronizza Excel'}
@@ -655,31 +668,30 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
       </div>
 
       {/* Tabella Premium */}
-      <div className="flex-1 bg-white dark:bg-neutral-800 rounded-3xl shadow-sm border border-neutral-100 dark:border-neutral-800 overflow-hidden flex flex-col mb-4">
-        <div className="overflow-x-auto overflow-y-auto flex-1 custom-scrollbar">
+      <div className="flex-1 flex-col">
+        <div className="relative flex-1 min-w-0 overflow-x-auto overflow-y-auto custom-scrollbar [&::-webkit-scrollbar]:w-[8px] [&::-webkit-scrollbar-track]:bg-neutral-100 dark:[&::-webkit-scrollbar-track]:bg-neutral-800 [&::-webkit-scrollbar-thumb]:bg-neutral-300 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-600 [&::-webkit-scrollbar-thumb:hover]:bg-neutral-400 dark:[&::-webkit-scrollbar-thumb:hover]:bg-neutral-500">
           <table className="w-full text-left border-collapse min-w-max">
             <thead>
-              <tr className="bg-neutral-50/80 dark:bg-neutral-900/50 backdrop-blur-sm sticky top-0 z-10 border-b border-neutral-100 dark:border-neutral-800">
-                <th className="px-6 py-5 first:rounded-tl-3xl"><div className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">#</div></th>
+              <tr className="bg-neutral-50/80 dark:bg-neutral-900/50 backdrop-blur-sm sticky top-0 border-b border-neutral-100 dark:border-neutral-800">
+
                 {tableCols.map((col, i) => (
-                  <th key={i} className="px-6 py-5 cursor-pointer group/th" onClick={() => { setSortCol(col); setSortDir(prev => prev === 1 ? -1 : 1); }}>
+                  <th key={i} className={`px-6 py-5 ${i === 0 ? 'first:rounded-tl-3xl' : ''} cursor-pointer group/th`} onClick={() => { setSortCol(col); setSortDir(prev => prev === 1 ? -1 : 1); }}>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400 group-hover/th:text-primary-600 transition-colors uppercase">{col}</span>
                       {sortCol === col && <div className={`w-1.5 h-1.5 rounded-full bg-primary-500 ${sortDir === 1 ? 'animate-bounce' : ''}`} />}
                     </div>
                   </th>
                 ))}
-                <th className="px-6 py-5 sticky right-0 bg-neutral-50/80 dark:bg-neutral-900/50 text-right"><div className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">Azioni</div></th>
+                <th className="px-6 py-5"><div className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">Azioni</div></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-50 dark:divide-neutral-900">
               {visibleRows.map((row, ri) => (
                 <tr key={ri} className="group hover:bg-neutral-50/50 dark:hover:bg-neutral-800/50 transition-colors cursor-pointer" onClick={() => openEdit(rows.indexOf(row))}>
-                  <td className="px-6 py-4"><span className="text-xs font-bold text-neutral-400">#{ri + 1}</span></td>
                   {tableCols.map((col, ci) => (
                     <td key={ci} className="px-6 py-4">{renderCellValue(row[col], col)}</td>
                   ))}
-                  <td className="px-6 py-4 sticky right-0 bg-white dark:bg-neutral-800 group-hover:bg-neutral-50 dark:group-hover:bg-neutral-850 transition-colors">
+                  <td className="px-6 py-4 group-hover:bg-neutral-50 dark:group-hover:bg-neutral-850 transition-colors">
                     <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={(e) => { e.stopPropagation(); openEdit(rows.indexOf(row)); }} className="p-1.5 text-neutral-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-all"><Edit2 className="w-4 h-4" /></button>
                       <button onClick={(e) => { e.stopPropagation(); deleteRow(rows.indexOf(row)); }} className="p-1.5 text-neutral-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
@@ -698,7 +710,7 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
         </div>
       </div>
 
-       {/* Footer info */}
+      {/* Footer info */}
       <div className="mt-auto px-4 py-3 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ArrowLeft className="w-3.5 h-3.5 text-neutral-400" />
@@ -730,27 +742,27 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
                   const isMulti = isMultiEntryValue(val);
                   return (
                     <div key={col} className="flex flex-col gap-2">
-                       <label className="text-[11px] font-black uppercase tracking-widest text-neutral-400 px-1">{col}</label>
-                       {isMulti ? (
-                         <MultiEntryEditor value={String(val)} onChange={(newVal) => setFormData(prev => ({...prev, [col]: newVal}))} />
-                       ) : (
-                         <textarea
-                            className="w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:bg-white dark:focus:bg-neutral-800 transition-all outline-none resize-none min-h-[44px]"
-                            value={val ?? ''}
-                            onChange={(e) => {
-                              const target = e.target;
-                              target.style.height = 'auto';
-                              target.style.height = target.scrollHeight + 'px';
-                              setFormData(prev => ({...prev, [col]: target.value}));
-                            }}
-                            onFocus={(e) => {
-                               const target = e.target as HTMLTextAreaElement;
-                               target.style.height = 'auto';
-                               target.style.height = target.scrollHeight + 'px';
-                            }}
-                            placeholder={`Inserisci ${col.toLowerCase()}...`}
-                         />
-                       )}
+                      <label className="text-[11px] font-black uppercase tracking-widest text-neutral-400 px-1">{col}</label>
+                      {isMulti ? (
+                        <MultiEntryEditor value={String(val)} onChange={(newVal) => setFormData(prev => ({ ...prev, [col]: newVal }))} />
+                      ) : (
+                        <textarea
+                          className="w-full px-4 py-3 bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:bg-white dark:focus:bg-neutral-800 transition-all outline-none resize-none min-h-[44px]"
+                          value={val ?? ''}
+                          onChange={(e) => {
+                            const target = e.target;
+                            target.style.height = 'auto';
+                            target.style.height = target.scrollHeight + 'px';
+                            setFormData(prev => ({ ...prev, [col]: target.value }));
+                          }}
+                          onFocus={(e) => {
+                            const target = e.target as HTMLTextAreaElement;
+                            target.style.height = 'auto';
+                            target.style.height = target.scrollHeight + 'px';
+                          }}
+                          placeholder={`Inserisci ${col.toLowerCase()}...`}
+                        />
+                      )}
                     </div>
                   );
                 })}
@@ -758,6 +770,23 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
             </div>
             <div className="px-8 py-6 border-t border-neutral-100 dark:border-neutral-700 flex justify-end gap-3 bg-neutral-50/50 dark:bg-neutral-800/50">
               <button onClick={() => setModalOpen(false)} className="px-6 py-3 bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 text-neutral-600 dark:text-neutral-200 font-bold rounded-2xl transition-all">Annulla</button>
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  const confirmed = await ask('Eliminare definitivamente questa riga?', {
+                    title: 'Conferma eliminazione',
+                    kind: 'warning'
+                  });
+                  if (confirmed && editingIdx !== null) {
+                    deleteRow(editingIdx, true);
+                    setModalOpen(false);
+                  }
+                }}
+                disabled={isNew}
+                className={`px-6 py-3 ${isNew ? 'bg-neutral-400 text-neutral-500 cursor-not-allowed' : 'bg-red-500 text-white font-bold hover:bg-red-600'} rounded-2xl transition-all flex items-center gap-2`}
+              >
+                <Trash2 className="w-4 h-4" /> Elimina
+              </button>
               <button onClick={saveRow} className="px-8 py-3 bg-primary-600 text-white font-bold rounded-2xl shadow-lg hover:bg-primary-700 transition-all flex items-center gap-2"><CheckCircle className="w-4 h-4" /> Conferma</button>
             </div>
           </div>
@@ -767,12 +796,12 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
       {/* Toast */}
       {toastMsg && (
         <div className={`fixed bottom-8 right-8 z-[200] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-right-10 
-          ${toastMsg.type === 'success' ? 'bg-emerald-500 text-white' : 
-            toastMsg.type === 'error' ? 'bg-red-500 text-white' : 
-            toastMsg.type === 'loading' ? 'bg-blue-600 text-white' : 'bg-neutral-800 text-white'}`}>
-          {toastMsg.type === 'loading' ? <Loader2 className="w-5 h-5 animate-spin" /> : 
-           toastMsg.type === 'success' ? <CheckCircle className="w-5 h-5" /> : 
-           toastMsg.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <Loader2 className="w-5 h-5" />}
+          ${toastMsg.type === 'success' ? 'bg-emerald-500 text-white' :
+            toastMsg.type === 'error' ? 'bg-red-500 text-white' :
+              toastMsg.type === 'loading' ? 'bg-blue-600 text-white' : 'bg-neutral-800 text-white'}`}>
+          {toastMsg.type === 'loading' ? <Loader2 className="w-5 h-5 animate-spin" /> :
+            toastMsg.type === 'success' ? <CheckCircle className="w-5 h-5" /> :
+              toastMsg.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <Loader2 className="w-5 h-5" />}
           <span className="text-sm font-bold">{toastMsg.text}</span>
         </div>
       )}
