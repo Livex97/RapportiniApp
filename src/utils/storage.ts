@@ -613,3 +613,28 @@ export async function getExcelDataJson(type: 'pandetta' | 'sterlink'): Promise<a
         return undefined;
     }
 }
+
+/**
+ * Gets the stored original file hash for an Excel manager
+ */
+export async function getExcelFileHash(type: 'pandetta' | 'sterlink'): Promise<string | null | undefined> {
+    try {
+        const store = await getStore();
+        return await store.get<string>(`${type}_file_hash`);
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Saves the original file hash for an Excel manager
+ */
+export async function setExcelFileHash(type: 'pandetta' | 'sterlink', hash: string): Promise<void> {
+    try {
+        const store = await getStore();
+        await store.set(`${type}_file_hash`, hash);
+        await store.save();
+    } catch (e) {
+        console.error(`[Storage] Error saving ${type} file hash:`, e);
+    }
+}

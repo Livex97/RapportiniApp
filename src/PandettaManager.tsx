@@ -3,7 +3,7 @@ import { FileSpreadsheet, Upload, Download, Search, X, Plus, CheckCircle, AlertC
 import { listen } from '@tauri-apps/api/event';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { save, open, ask } from '@tauri-apps/plugin-dialog';
-import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting, clearExcelFile } from './utils/storage';
+import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting, clearExcelFile, getExcelFileHash, setExcelFileHash } from './utils/storage';
 import { invoke } from '@tauri-apps/api/core';
 import ExcelJS from 'exceljs';
 
@@ -119,9 +119,19 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
 
         if (path) {
           setOriginalPath(path);
-          // Calcola hash del file originale all'avvio
-          const hash = await calculateFileHash(path);
-          if (hash) setOriginalFileHash(hash);
+          // Controlla se esiste un hash persisitente precedentemente salvato
+          const persistedHash = await getExcelFileHash('pandetta');
+          if (persistedHash) {
+            setOriginalFileHash(persistedHash);
+          } else {
+            // Altrimenti calcola l'hash del file corrente
+            const hash = await calculateFileHash(path);
+            if (hash) {
+              setOriginalFileHash(hash);
+              // Salva l'hash persistente per confronti futuri
+              await setExcelFileHash('pandetta', hash);
+            }
+          }
         }
         if (name) setFileName(name);
 
@@ -314,6 +324,8 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
       const hash = await calculateFileHash(path);
       if (hash) {
         setOriginalFileHash(hash);
+        // Salva l'hash persistente per confronti futuri
+        await setExcelFileHash('pandetta', hash);
         setShowExternalUpdateBanner(false); // Nascondi banner se caricato nuovo file
       }
     }
