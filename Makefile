@@ -32,10 +32,12 @@ install-dev:
 build:
 	@echo "Build con PyInstaller..."
 	@pyinstaller src-tauri/python/save_pandetta.spec
+	@pyinstaller src-tauri/python/save_sterlink-aarch64-apple-darwin.spec
 	@echo "Copying binary to src-tauri/binaries..."
 	@mkdir -p src-tauri/binaries
 	@cp dist/save_pandetta src-tauri/binaries/
-	@echo "Build complete! Binary is in src-tauri/binaries/save_pandetta"
+	@cp dist/save_sterlink-aarch64-apple-darwin src-tauri/binaries/
+	@echo "Build complete! Binaries are in src-tauri/binaries/save_pandetta and src-tauri/binaries/save_sterlink-aarch64-apple-darwin"
 
 clean:
 	@echo "Pulizia..."

@@ -104,22 +104,39 @@ def main():
 
     wb = openpyxl.load_workbook(in_path)
     
-    # Cerca la tabella 'Pandetta' in tutti i fogli
+    # Cerca specificamente la tabella 'Tabella1' in tutti i fogli
     pandetta_table = None
     ws = None
     for sheet in wb.worksheets:
         tables_list = getattr(sheet, 'tables', getattr(sheet, '_tables', {}))
-        for table in tables_list.values():
-            table_name_upper = list(tables_list.keys())[list(tables_list.values()).index(table)].upper() if not hasattr(table, 'name') else table.name.upper()
-            if any(keyword in table_name_upper for keyword in ['PANDETTA', 'PANDET', 'ASSISTENZA']):
-                pandetta_table = table
-                ws = sheet
-                break
-        if ws:
+        # Cerca prima la tabella con nome esatto "Tabella1"
+        if 'Tabella1' in tables_list:
+            pandetta_table = tables_list['Tabella1']
+            ws = sheet
             break
+        # Se non troviamo Tabella1, cerchiamo comunque una tabella Pandetta per compatibilità
+        elif pandetta_table is None:  # Solo se non abbiamo già trovato Tabella1
+            for table_name, table in tables_list.items():
+                table_name_upper = table_name.upper() if not hasattr(table, 'name') else table.name.upper()
+                if any(keyword in table_name_upper for keyword in ['PANDETTA', 'PANDET', 'ASSISTENZA']):
+                    pandetta_table = table
+                    ws = sheet
+                    break
     
+    # Se non troviamo nessuna tabella specifica, usiamo il foglio attivo
     if ws is None:
         ws = wb.active
+    
+    # Determina i limiti della tabella se esiste
+    table_bounds = None
+    if pandetta_table:
+        try:
+            from openpyxl.utils import range_boundaries
+            min_col, min_row, max_col, max_row = range_boundaries(pandetta_table.ref)
+            table_bounds = (min_row, max_row, min_col, max_col)
+        except Exception:
+            # Se non possiamo analizzare il riferimento della tabella, torniamo al comportamento originale
+            table_bounds = None
 
     if not dynamic_cols:
         if current_data:
@@ -201,8 +218,26 @@ def main():
         target_row = None
         
         if rif_val is None:
-            # Se non c'è N.RIF, aggiungi nuova riga in fondo
-            r = ws.max_row + 1
+            # Se non c'è N.RIF, aggiungi nuova riga
+            if table_bounds:
+                # Inserisci la riga dentro i limiti della tabella
+                min_row, max_row, min_col, max_col = table_bounds
+                r = max_row + 1  # Aggiungi alla fine della tabella corrente
+                
+                # Inserisci la riga nel foglio
+                ws.insert_rows(r)
+                
+                # Aggiorna il riferimento della tabella per includere la nuova riga
+                # Il nuovo riferimento sarà dalla stessa colonna di inizio alla stessa colonna di fine,
+                # ma dalla stessa riga di inizio alla nuova riga di fine
+                new_ref = f"{ws.cell(row=min_row, column=min_col).coordinate}:{ws.cell(row=r, column=max_col).coordinate}"
+                pandetta_table.ref = new_ref
+                if hasattr(pandetta_table, 'autoFilter') and pandetta_table.autoFilter:
+                    pandetta_table.autoFilter.ref = pandetta_table.ref
+            else:
+                # Nessuna tabella trovata o limiti non determinabili, aggiungi alla fine del foglio
+                r = ws.max_row + 1
+            
             for col in dynamic_cols:
                 if col in col_map:
                     ws.cell(row=r, column=col_map[col], value=row.get(col))
@@ -218,7 +253,26 @@ def main():
                         ws.cell(row=r, column=col_map[col], value=row.get(col))
                 target_row = ws[r]
             else:
-                r = ws.max_row + 1
+                # Nuova rif - aggiungi nuova riga
+                if table_bounds:
+                    # Inserisci la riga dentro i limiti della tabella
+                    min_row, max_row, min_col, max_col = table_bounds
+                    r = max_row + 1  # Aggiungi alla fine della tabella corrente
+                    
+                    # Inserisci la riga nel foglio
+                    ws.insert_rows(r)
+                    
+                    # Aggiorna il riferimento della tabella per includere la nuova riga
+                    # Il nuovo riferimento sarà dalla stessa colonna di inizio alla stessa colonna di fine,
+                    # ma dalla stessa riga di inizio alla nuova riga di fine
+                    new_ref = f"{ws.cell(row=min_row, column=min_col).coordinate}:{ws.cell(row=r, column=max_col).coordinate}"
+                    pandetta_table.ref = new_ref
+                    if hasattr(pandetta_table, 'autoFilter') and pandetta_table.autoFilter:
+                        pandetta_table.autoFilter.ref = pandetta_table.ref
+                else:
+                    # Nessuna tabella trovata o limiti non determinabili, aggiungi alla fine del foglio
+                    r = ws.max_row + 1
+                
                 for col in dynamic_cols:
                     if col in col_map:
                         ws.cell(row=r, column=col_map[col], value=row.get(col))

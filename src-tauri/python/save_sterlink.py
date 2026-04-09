@@ -51,6 +51,17 @@ def main():
         sys.exit(1)
     
     ws = wb.active # Sterlink usually has one main sheet
+    
+    # Find the table in the worksheet
+    table = None
+    if hasattr(ws, 'tables') and ws.tables:
+        # Look for the specific table name "Tabella1" first
+        if 'Tabella1' in ws.tables:
+            table = ws.tables['Tabella1']
+        else:
+            # Fallback to the first table if "Tabella1" not found
+            table_name = list(ws.tables.keys())[0]
+            table = ws.tables[table_name]
 
     if not dynamic_cols:
         if current_data:
@@ -61,6 +72,18 @@ def main():
     header_cells = list(ws.iter_rows(min_row=1, max_row=1, values_only=True))[0]
     headers = [str(h).strip() if h else '' for h in header_cells]
     col_map = {h: idx+1 for idx, h in enumerate(headers) if h}
+    
+    # Determine table boundaries if a table exists
+    table_bounds = None
+    if table:
+        # Parse the table range (e.g., "A1:D10")
+        try:
+            from openpyxl.utils import range_boundaries
+            min_col, min_row, max_col, max_row = range_boundaries(table.ref)
+            table_bounds = (min_row, max_row, min_col, max_col)
+        except Exception:
+            # If we can't parse the table ref, fall back to using the whole sheet
+            table_bounds = None
 
     # ID colonna per Sterlink: NUMERO CHECKLIST
     id_col_idx = get_column_index(headers, 'NUMERO CHECKLIST')
@@ -128,11 +151,29 @@ def main():
                     ws.cell(row=r, column=col_map[col], value=row.get(col))
             target_row = ws[r]
         else:
-            # Nuova riga
-            r = ws.max_row + 1
+            # Nuova riga - inseriscila correttamente nella tabella se esiste, altrimenti alla fine del foglio
+            if table_bounds:
+                # Inserisci la riga appena prima dell'ultima riga della tabella per mantenerla dentro i limiti della tabella
+                min_row, max_row, min_col, max_col = table_bounds
+                r = max_row + 1  # Aggiungi alla fine della tabella corrente
+                
+                # Inserisci la riga nel foglio
+                ws.insert_rows(r)
+                
+                # Aggiorna il riferimento della tabella per includere la nuova riga
+                # Il nuovo riferimento sarà dalla stessa colonna di inizio alla stessa colonna di fine,
+                # ma dalla stessa riga di inizio alla nuova riga di fine
+                new_ref = f"{ws.cell(row=min_row, column=min_col).coordinate}:{ws.cell(row=r, column=max_col).coordinate}"
+                table.ref = new_ref
+            else:
+                # Nessuna tabella trovata, aggiungi alla fine del foglio (comportamento originale)
+                r = ws.max_row + 1
+            
+            # Compila i valori delle colonne
             for col in dynamic_cols:
                 if col in col_map:
                     ws.cell(row=r, column=col_map[col], value=row.get(col))
+            
             target_row = ws[r]
             if example_row:
                 copy_row_formatting(example_row, target_row, ws)
