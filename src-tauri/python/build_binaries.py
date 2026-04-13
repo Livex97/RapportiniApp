@@ -22,7 +22,7 @@ def build_binary(script_path, target_name, output_dir):
     filename = os.path.basename(script_path)
     name = os.path.splitext(filename)[0]
     
-    print(f"\n🚀 {name.upper()}: Building for {target_name}...")
+    print(f"\n[BUILD] {name.upper()}: Building for {target_name}...")
     
     # Use --name to ensure the output binary has the correct name for Tauri
     # Tauri expects: name-target_triple.exe (on windows) or name-target_triple (on mac/linux)
@@ -43,7 +43,7 @@ def build_binary(script_path, target_name, output_dir):
     result = subprocess.run(cmd)
     
     if result.returncode != 0:
-        print(f"❌ Error building {name}")
+        print(f"[ERROR] Error building {name}")
         return False
     
     src_file = os.path.join("dist", f"{target_filename}{ext}")
@@ -59,14 +59,14 @@ def build_binary(script_path, target_name, output_dir):
             shutil.copy2(src_file, dev_dest)
             if platform.system().lower() != "windows":
                 os.chmod(dev_dest, 0o755)
-            print(f"✅ Local dev binary created: {dev_dest}")
+            print(f"[SUCCESS] Local dev binary created: {dev_dest}")
             
         if platform.system().lower() != "windows":
             os.chmod(dest_file, 0o755)
-        print(f"✨ Built: {dest_file}")
+        print(f"[DONE] Built: {dest_file}")
         return True
     else:
-        print(f"❌ Source file not found: {src_file}")
+        print(f"[ERROR] Source file not found: {src_file}")
         return False
 
 def main():
@@ -94,12 +94,12 @@ def main():
             if build_binary(script, target, output_dir):
                 success_count += 1
         else:
-            print(f"⚠️ Warning: {script} not found")
+            print(f"[WARNING] {script} not found")
             
     if success_count == len(scripts):
-        print("\n🎉 All binaries built successfully!")
+        print("\n[SUCCESS] All binaries built successfully!")
     else:
-        print(f"\n⚠️ Built {success_count}/{len(scripts)} binaries.")
+        print(f"\n[INFO] Built {success_count}/{len(scripts)} binaries.")
         sys.exit(1)
 
 if __name__ == "__main__":
