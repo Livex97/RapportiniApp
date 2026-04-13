@@ -189,3 +189,55 @@ pub async fn save_sterlink_command(
 
     Ok(format!("File salvato: {}", params.output_path))
 }
+
+#[tauri::command]
+pub async fn read_excel_command(
+    path: String,
+    type_hint: String,
+) -> Result<serde_json::Value, String> {
+    let executable = if cfg!(debug_assertions) {
+        find_sidecar_dev("read_excel")?
+    } else {
+        let exe_dir = std::env::current_exe()
+            .map_err(|e| format!("Impossibile trovare exe path: {}", e))?
+            .parent()
+            .ok_or_else(|| "Impossibile trovare directory exe".to_string())?
+            .to_path_buf();
+
+        let target = get_current_target();
+        let ext = get_exe_extension();
+
+        let with_triple = exe_dir.join(format!("read_excel-{}{}", target, ext));
+        let without_triple = exe_dir.join(format!("read_excel{}", ext));
+        
+        if with_triple.exists() {
+            with_triple
+        } else if without_triple.exists() {
+            without_triple
+        } else {
+            return Err(format!(
+                "read_excel non trovato in {:?}. Cercato: read_excel-{}{} e read_excel{}",
+                exe_dir, target, ext, ext
+            ));
+        }
+    };
+
+    // Esegui lo script Python
+    let output = Command::new(&executable)
+        .arg(&path)
+        .arg(&type_hint)
+        .output()
+        .map_err(|e| format!("Failed to execute {:?}: {}", executable, e))?;
+
+    if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Python error: {}", err_msg));
+    }
+
+    // Decodifica JSON restituito da stdout
+    let stdout_content = String::from_utf8_lossy(&output.stdout);
+    let data: serde_json::Value = serde_json::from_str(&stdout_content)
+        .map_err(|e| format!("Failed to parse JSON output: {}", e))?;
+
+    Ok(data)
+}

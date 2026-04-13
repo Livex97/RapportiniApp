@@ -3,9 +3,8 @@ import { FileSpreadsheet, Upload, Download, Search, X, Plus, CheckCircle, AlertC
 import { listen } from '@tauri-apps/api/event';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { save, open, ask } from '@tauri-apps/plugin-dialog';
-import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting, clearExcelFile, getExcelFileHash, setExcelFileHash } from './utils/storage';
+import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting, clearExcelFile, getExcelFileHash, setExcelFileHash, getCachedExcelFilePath } from './utils/storage';
 import { invoke } from '@tauri-apps/api/core';
-import ExcelJS from 'exceljs';
 
 // Tipi
 interface PandettaRow {
@@ -155,11 +154,12 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
         } else {
           const file = await getExcelFile('pandetta');
           if (file) {
-            const buffer = await file.arrayBuffer();
-            const wb = new ExcelJS.Workbook();
-            await wb.xlsx.load(buffer);
-            await parseSheet(wb);
-            setView('table');
+            const cachedPath = await getCachedExcelFilePath('pandetta');
+            const response = await invoke<any>('read_excel_command', { 
+                path: cachedPath,
+                typeHint: 'pandetta' 
+            });
+            await processLoadedData(response.rows, response.columns);
           }
         }
       } catch (err) {
@@ -335,163 +335,76 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
     }
 
     try {
-      const buffer = await file.arrayBuffer();
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(buffer);
-      await parseSheet(wb);
-      setView('table');
+      const response = await invoke<any>('read_excel_command', { 
+        path: path || file.name,
+        typeHint: 'pandetta' 
+      });
+
+      await processLoadedData(response.rows, response.columns);
       toast(`File caricato: ${file.name}`, 'success');
-    setIsLoadingFile(false);
+      setIsLoadingFile(false);
     } catch (err: any) {
-      toast(`Errore nel caricamento: ${err.message}`, 'error');
-    setIsLoadingFile(false);
+      console.error('Error reading excel via python:', err);
+      toast(`Errore nel caricamento: ${err}`, 'error');
+      setIsLoadingFile(false);
     }
   };
 
-  const formatDate = (d: any) => {
-    if (!d) return null;
-    const dt = new Date(d);
-    if (isNaN(dt.getTime())) return null;
-    const dd = String(dt.getDate()).padStart(2, '0');
-    const mm = String(dt.getMonth() + 1).padStart(2, '0');
-    return `${dd}/${mm}/${dt.getFullYear()}`;
-  };
+  const processLoadedData = async (rows: any[], fileColumns: string[]) => {
+    if (!rows || rows.length === 0) return;
 
-  // Trova il foglio PANDETTA per nome
-  const findPandettaSheet = (wb: any) => {
-    const sheets = wb.worksheets || [];
-    const sheetNames: string[] = [];
-    for (const ws of sheets) {
-      const name = ws.name;
-      if (typeof name === 'string') {
-        sheetNames.push(name);
+    // Ordina le colonne: N.RIF all'inizio, poi tutte le altre nell'ordine del file
+    const rifCol = fileColumns.find(c => c.toUpperCase().includes('RIF') && c.toUpperCase().includes('PANDETTA'))
+      || fileColumns.find(c => c.toUpperCase().includes('RIF'))
+      || 'N.RIF PANDETTA';
+
+    const orderedCols = [
+      rifCol, 
+      ...fileColumns.filter(c => c !== rifCol && !c.startsWith('_'))
+    ];
+    
+    setDynamicCols(orderedCols);
+
+    const processedRows = rows.map((item: any) => {
+      // Verifica se la riga è vuota (basandoci sui primi 3 campi)
+      let filledCount = 0;
+      for (let i = 0; i < Math.min(3, orderedCols.length); i++) {
+        const val = item[orderedCols[i]];
+        if (val !== null && val !== '' && val !== 'null') filledCount++;
       }
-    }
-    const pandettaSheet = sheetNames.find((name: string) =>
-      name.toUpperCase().includes('PANDETTA') ||
-      name.toUpperCase().includes('PANDET') ||
-      name.toUpperCase().includes('ASSISTENZA')
-    );
-    return pandettaSheet || sheetNames[0];
-  };
+      const isEmpty = filledCount === 0;
 
-  const getCellRgbFromExcelJS = (cell: any) => {
-    if (!cell || !cell.fill) return null;
-    const fill = cell.fill;
-    if (fill.type === 'pattern' && fill.fgColor && fill.fgColor.argb) {
-      return fill.fgColor.argb.replace(/^FF/i, '');
-    }
-    return null;
-  };
+      // Logica STATO
+      const statoCol = orderedCols.find(c => c.toUpperCase().includes('STATO') && c.toUpperCase().includes('INTERVENTO'));
+      const esitoCol = orderedCols.find(c => c.toUpperCase().includes('ESITO'));
+      const statoVal = statoCol ? item[statoCol] : null;
+      const esitoVal = esitoCol ? item[esitoCol] : null;
 
-  const parseSheet = async (wb: any) => {
-    const sheetName = findPandettaSheet(wb);
-    const ws = wb.worksheets.find((ws: any) => ws.name === sheetName) || wb.worksheets[0];
+      // Per ora resettiamo originalBg perché Python non ci dà lo stile del file
+      const status = deriveStatus(statoVal, esitoVal, null);
 
-    // Leggi la prima riga come intestazione
-    const headerRow = ws.getRow(1);
-    const colCount = headerRow.cellCount;
+      return {
+        ...item,
+        _status: status,
+        _empty: isEmpty,
+        _originalBg: null
+      };
+    });
 
-    // Identifica le colonne dinamicamente
-    const cols: string[] = [];
-    const colIndices: number[] = [];
-
-    for (let c = 1; c <= colCount; c++) {
-      const cell = headerRow.getCell(c);
-      const header = cell.value;
-      if (header != null && String(header).trim() !== '') {
-        cols.push(String(header).trim());
-        colIndices.push(c - 1); // 0-based per uso successivo
-      }
+    // Rimuovi righe vuote in coda
+    while (processedRows.length > 0 && processedRows[processedRows.length - 1]._empty) {
+      processedRows.pop();
     }
 
-    if (cols.length === 0) {
-      throw new Error('Impossibile identificare le colonne nella prima riga');
-    }
-
-    setDynamicCols(cols);
-
-    const newRows: PandettaRow[] = [];
-    const rowCount = ws.rowCount;
-
-    // Inizia dalla riga 2 (dopo l'intestazione)
-    for (let r = 2; r <= rowCount; r++) {
-      const xlRow = ws.getRow(r);
-
-      // Verifica se la riga è vuota (controlla le prime 3 colonne)
-      let hasData = false;
-      for (let i = 0; i < Math.min(3, cols.length); i++) {
-        const cell = xlRow.getCell(colIndices[i] + 1);
-        const val = cell.value;
-        if (val != null && val !== '' && val !== 'null') {
-          hasData = true;
-          break;
-        }
-      }
-
-      if (!hasData) {
-        const emptyRow: PandettaRow = {
-          _originalBg: null,
-          _empty: true,
-          _status: 'aperta'
-        };
-        for (const col of cols) {
-          emptyRow[col] = null;
-        }
-        newRows.push(emptyRow);
-        continue;
-      }
-
-      const row: PandettaRow = { _status: 'aperta', _empty: false };
-
-      // Popola i valori dalle colonne identificate
-      for (let idx = 0; idx < cols.length; idx++) {
-        const col = cols[idx];
-        const cell = xlRow.getCell(colIndices[idx] + 1);
-        let value = cell.value;
-
-        if (value instanceof Date) {
-          value = formatDate(value);
-        } else if (value !== null && value !== undefined) {
-          value = String(value);
-        } else {
-          value = null;
-        }
-
-        row[col] = value;
-      }
-
-      // Ottieni il colore di sfondo dalla prima colonna
-      const bgCell = xlRow.getCell(1);
-      const rowBg = getCellRgbFromExcelJS(bgCell);
-      row._originalBg = rowBg;
-
-      // Deriva lo stato usando le colonne identificate
-      const statoCol = cols.find(c => c.toUpperCase().includes('STATO') && c.toUpperCase().includes('INTERVENTO'));
-      const esitoCol = cols.find(c => c.toUpperCase().includes('ESITO'));
-
-      const statoVal = statoCol ? row[statoCol] : null;
-      const esitoVal = esitoCol ? row[esitoCol] : null;
-
-      row._status = deriveStatus(statoVal, esitoVal, rowBg);
-
-      newRows.push(row);
-    }
-
-    // Rimuovi le righe vuote finali
-    while (newRows.length > 0 && newRows[newRows.length - 1]._empty) {
-      newRows.pop();
-    }
-
-    setRows(newRows);
-    setOriginalRows(newRows);
+    setRows(processedRows);
+    setOriginalRows(processedRows);
     setHasUnsavedChanges(false);
-    buildTecnicoColorMap(newRows);
+    buildTecnicoColorMap(processedRows);
+    setView('table');
 
-    // Salva i metadati
-    await saveExcelDataJson('pandetta', newRows);
-    await setSetting('pandetta_original_rows_count', newRows.length);
-    await setSetting('pandetta_dynamic_cols', cols);
+    // Persistenza
+    await saveExcelDataJson('pandetta', processedRows);
+    await setSetting('pandetta_dynamic_cols', orderedCols);
   };
 
   const getVisibleRows = useCallback(() => {

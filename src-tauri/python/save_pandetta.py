@@ -341,14 +341,19 @@ def main():
             
             # Trova l'ultima riga con dati SOLO nelle colonne della tabella
             last_row_with_data = start_row
-            for row_idx in range(start_row + 1, ws.max_row + 1):
+            # Partiamo dal basso verso l'alto per trovare l'ultima riga piena
+            for row_idx in range(ws.max_row, start_row, -1):
+                row_has_data = False
                 for col_idx in range(start_col_idx, end_col_idx + 1):
                     cell = ws.cell(row=row_idx, column=col_idx)
                     if cell.value is not None and str(cell.value).strip():
                         last_row_with_data = row_idx
+                        row_has_data = True
                         break
+                if row_has_data:
+                    break
             
-            new_last_row = max(last_row_with_data, end_row_orig)
+            new_last_row = last_row_with_data
             new_end_cell = f"{end_col_letters}{new_last_row}"
             pandetta_table.ref = f"{start_cell_str}:{new_end_cell}"
             if hasattr(pandetta_table, 'autoFilter') and pandetta_table.autoFilter:

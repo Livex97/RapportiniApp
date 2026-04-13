@@ -59,7 +59,8 @@
     ],
     "externalBin": [
       "binaries/save_pandetta",
-      "binaries/save_sterlink"
+      "binaries/save_sterlink",
+      "binaries/read_excel"
     ]
   }
 }

@@ -186,6 +186,46 @@ def main():
         except Exception as e:
             print(f"Warning: could not delete row {r_idx}: {e}", file=sys.stderr)
 
+    # Aggiorna la dimensione della tabella se presente
+    if table:
+        table_range = table.ref
+        if ':' in table_range:
+            start_cell_str, end_cell_str = table_range.split(':')
+            
+            # Estrai colonna iniziale e riga iniziale
+            start_col_letters = ''.join([c for c in start_cell_str if not c.isdigit()])
+            start_row = int(''.join([c for c in start_cell_str if c.isdigit()])) if any(c.isdigit() for c in start_cell_str) else 1
+            
+            # Estrai colonna finale
+            end_col_letters = ''.join([c for c in end_cell_str if not c.isdigit()])
+            
+            # Trova indici numerici
+            try:
+                start_col_idx = column_index_from_string(start_col_letters)
+                end_col_idx = column_index_from_string(end_col_letters)
+            except Exception:
+                start_col_idx = 1
+                end_col_idx = ws.max_column
+
+            # Trova l'ultima riga con dati
+            last_row_with_data = start_row
+            for row_idx in range(ws.max_row, start_row, -1):
+                row_has_data = False
+                for col_idx in range(start_col_idx, end_col_idx + 1):
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    if cell.value is not None and str(cell.value).strip():
+                        last_row_with_data = row_idx
+                        row_has_data = True
+                        break
+                if row_has_data:
+                    break
+            
+            new_last_row = last_row_with_data
+            new_end_cell = f"{end_col_letters}{new_last_row}"
+            table.ref = f"{start_cell_str}:{new_end_cell}"
+            if hasattr(table, 'autoFilter') and table.autoFilter:
+                table.autoFilter.ref = table.ref
+
     wb.save(out_path)
     print(f"Successfully saved to {out_path}")
 

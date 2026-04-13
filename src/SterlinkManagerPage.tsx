@@ -3,9 +3,8 @@ import { FileSpreadsheet, Upload, Search, X, Plus, CheckCircle, AlertCircle, Edi
 import { listen } from '@tauri-apps/api/event';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { save, open, ask } from '@tauri-apps/plugin-dialog';
-import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting, getExcelFileHash, setExcelFileHash } from './utils/storage';
+import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting, getExcelFileHash, setExcelFileHash, getCachedExcelFilePath } from './utils/storage';
 import { invoke } from '@tauri-apps/api/core';
-import ExcelJS from 'exceljs';
 
 // --- Types ---
 interface SterlinkRow {
@@ -127,165 +126,166 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
   const [isDragging, setIsDragging] = useState(false);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' | 'loading' } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-   const [dynamicCols, setDynamicCols] = useState<string[]>([]);
-   const [originalFileHash, setOriginalFileHash] = useState<string | null>(null);
-   const [showExternalUpdateBanner, setShowExternalUpdateBanner] = useState(false);
-   const [lastNotifiedExternalHash, setLastNotifiedExternalHash] = useState<string | null>(null);
-   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-    const [originalRows, setOriginalRows] = useState<SterlinkRow[]>([]);
-    const AUTO_REFRESH_INTERVAL = 8000;
+  const [dynamicCols, setDynamicCols] = useState<string[]>([]);
+  const [originalFileHash, setOriginalFileHash] = useState<string | null>(null);
+  const [showExternalUpdateBanner, setShowExternalUpdateBanner] = useState(false);
+  const [lastNotifiedExternalHash, setLastNotifiedExternalHash] = useState<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [originalRows, setOriginalRows] = useState<SterlinkRow[]>([]);
+  const AUTO_REFRESH_INTERVAL = 8000;
 
-    const calculateFileHash = async (filePath: string): Promise<string | null> => {
+  const calculateFileHash = async (filePath: string): Promise<string | null> => {
+    try {
+      const fileContent = await readFile(filePath);
+      const bytes = new Uint8Array(fileContent);
+      let hash = 0;
+      for (let i = 0; i < bytes.length; i++) {
+        hash = ((hash << 5) - hash) + bytes[i];
+        hash |= 0;
+      }
+      return `${hash}-${bytes.length}`;
+    } catch (err) {
+      console.error('Error calculating file hash:', err);
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    const loadPersistentData = async () => {
       try {
-        const fileContent = await readFile(filePath);
-        const bytes = new Uint8Array(fileContent);
-        let hash = 0;
-        for (let i = 0; i < bytes.length; i++) {
-          hash = ((hash << 5) - hash) + bytes[i];
-          hash |= 0;
+        const jsonData = await getExcelDataJson('sterlink');
+        const path = await getExcelFilePath('sterlink');
+        const name = await getExcelFileName('sterlink');
+
+        if (path) {
+          setOriginalPath(path);
+          // Controlla se esiste un hash persisitente precedentemente salvato
+          const persistedHash = await getExcelFileHash('sterlink');
+          if (persistedHash) {
+            setOriginalFileHash(persistedHash);
+          } else {
+            // Altrimenti calcola l'hash del file corrente
+            const hash = await calculateFileHash(path);
+            if (hash) {
+              setOriginalFileHash(hash);
+              // Salva l'hash persistente per confronti futuri
+              await setExcelFileHash('sterlink', hash);
+            }
+          }
         }
-        return `${hash}-${bytes.length}`;
+        if (name) setFileName(name);
+
+        if (jsonData && jsonData.length > 0) {
+          setRows(jsonData);
+          setOriginalRows(jsonData);
+          setHasUnsavedChanges(false);
+
+          const savedCols = await getSetting<string[]>('sterlink_dynamic_cols', []);
+          if (savedCols.length > 0) {
+            setDynamicCols(savedCols);
+          } else {
+            const cols = Object.keys(jsonData[0]).filter(k => !k.startsWith('_'));
+            setDynamicCols(cols);
+          }
+          setView('table');
+        } else {
+          const file = await getExcelFile('sterlink');
+          if (file) {
+            const cachedPath = await getCachedExcelFilePath('sterlink');
+            const response = await invoke<any>('read_excel_command', {
+              path: cachedPath,
+              typeHint: 'sterlink'
+            });
+            await processLoadedData(response.rows, response.columns);
+          }
+        }
       } catch (err) {
-        console.error('Error calculating file hash:', err);
-        return null;
+        console.error('Error loading persistent data:', err);
       }
     };
+    loadPersistentData();
+  }, []);
 
-    useEffect(() => {
-      const loadPersistentData = async () => {
-        try {
-          const jsonData = await getExcelDataJson('sterlink');
-          const path = await getExcelFilePath('sterlink');
-          const name = await getExcelFileName('sterlink');
+  useEffect(() => {
+    let unlistenEnter: (() => void) | null = null;
+    let unlistenLeave: (() => void) | null = null;
+    let unlistenDrop: (() => void) | null = null;
 
-          if (path) {
-            setOriginalPath(path);
-            // Controlla se esiste un hash persisitente precedentemente salvato
-            const persistedHash = await getExcelFileHash('sterlink');
-            if (persistedHash) {
-              setOriginalFileHash(persistedHash);
-            } else {
-              // Altrimenti calcola l'hash del file corrente
-              const hash = await calculateFileHash(path);
-              if (hash) {
-                setOriginalFileHash(hash);
-                // Salva l'hash persistente per confronti futuri
-                await setExcelFileHash('sterlink', hash);
-              }
-            }
+    const setup = async () => {
+      unlistenEnter = await listen('tauri://drag-enter', () => {
+        if (view === 'upload') setIsDragging(true);
+      });
+      unlistenLeave = await listen('tauri://drag-leave', () => {
+        setIsDragging(false);
+      });
+      unlistenDrop = await listen('tauri://drag-drop', async (event: any) => {
+        setIsDragging(false);
+        if (view !== 'upload') return;
+        const paths = event.payload?.paths;
+        if (paths && paths.length > 0) {
+          try {
+            const filePath = paths[0];
+            const content = await readFile(filePath);
+            const name = filePath.split(/[/\\]/).pop() || 'file';
+            handleFile(new File([content], name), filePath);
+          } catch (err) {
+            console.error('Drag-drop error:', err);
+            toast('Errore nel caricamento file', 'error');
           }
-          if (name) setFileName(name);
-
-          if (jsonData && jsonData.length > 0) {
-            setRows(jsonData);
-            setOriginalRows(jsonData);
-            setHasUnsavedChanges(false);
-
-            const savedCols = await getSetting<string[]>('sterlink_dynamic_cols', []);
-            if (savedCols.length > 0) {
-              setDynamicCols(savedCols);
-            } else {
-              const cols = Object.keys(jsonData[0]).filter(k => !k.startsWith('_'));
-              setDynamicCols(cols);
-            }
-            setView('table');
-          } else {
-            const file = await getExcelFile('sterlink');
-            if (file) {
-              const buffer = await file.arrayBuffer();
-              const wb = new ExcelJS.Workbook();
-              await wb.xlsx.load(buffer);
-              await parseSheet(wb);
-              setView('table');
-            }
-          }
-        } catch (err) {
-          console.error('Error loading persistent data:', err);
         }
-      };
-      loadPersistentData();
-    }, []);
+      });
+    };
+    setup();
+    return () => {
+      if (unlistenEnter) unlistenEnter();
+      if (unlistenLeave) unlistenLeave();
+      if (unlistenDrop) unlistenDrop();
+    };
+  }, [view]);
 
-    useEffect(() => {
-      let unlistenEnter: (() => void) | null = null;
-      let unlistenLeave: (() => void) | null = null;
-      let unlistenDrop: (() => void) | null = null;
-
-      const setup = async () => {
-        unlistenEnter = await listen('tauri://drag-enter', () => {
-          if (view === 'upload') setIsDragging(true);
-        });
-        unlistenLeave = await listen('tauri://drag-leave', () => {
-          setIsDragging(false);
-        });
-        unlistenDrop = await listen('tauri://drag-drop', async (event: any) => {
-          setIsDragging(false);
-          if (view !== 'upload') return;
-          const paths = event.payload?.paths;
-          if (paths && paths.length > 0) {
-            try {
-              const filePath = paths[0];
-              const content = await readFile(filePath);
-              const name = filePath.split(/[/\\]/).pop() || 'file';
-              handleFile(new File([content], name), filePath);
-            } catch (err) {
-              console.error('Drag-drop error:', err);
-              toast('Errore nel caricamento file', 'error');
-            }
-          }
-        });
-      };
-      setup();
-      return () => {
-        if (unlistenEnter) unlistenEnter();
-        if (unlistenLeave) unlistenLeave();
-        if (unlistenDrop) unlistenDrop();
-      };
-    }, [view]);
-
-    useEffect(() => {
-          if (!originalPath || originalFileHash === null) return;
-          let mounted = true;
-          const interval = setInterval(() => {
-            (async () => {
-              if (!originalPath) return;
-              try {
-                const currentHash = await calculateFileHash(originalPath);
-                if (currentHash && currentHash !== originalFileHash && currentHash !== lastNotifiedExternalHash) {
-                  if (mounted) {
-                    setLastNotifiedExternalHash(currentHash);
-                    setShowExternalUpdateBanner(true);
-                    toast('Il file originale è stato modificato esternamente', 'info');
-                  }
-                }
-              } catch (err) { }
-            })();
-          }, AUTO_REFRESH_INTERVAL);
-        return () => {
-          mounted = false;
-          clearInterval(interval);
-        };
-      }, [originalPath, originalFileHash, lastNotifiedExternalHash]);
-
-      const toast = (text: string, type: 'success' | 'error' | 'info' | 'loading' = 'info') => {
-        setToastMsg({ text, type });
-        if (type !== 'loading') {
-          setTimeout(() => setToastMsg(null), 3000);
-        }
-      };
-
-      const reloadFromExternal = async () => {
+  useEffect(() => {
+    if (!originalPath || originalFileHash === null) return;
+    let mounted = true;
+    const interval = setInterval(() => {
+      (async () => {
         if (!originalPath) return;
         try {
-          const content = await readFile(originalPath);
-          const file = new File([content], fileName);
-          await handleFile(file, originalPath);
-          toast('File ricaricato con le modifiche esterne', 'success');
-        } catch (err) {
-          console.error('Error reloading external file:', err);
-          toast('Errore nel ricaricare il file', 'error');
-        }
-      };
+          const currentHash = await calculateFileHash(originalPath);
+          if (currentHash && currentHash !== originalFileHash && currentHash !== lastNotifiedExternalHash) {
+            if (mounted) {
+              setLastNotifiedExternalHash(currentHash);
+              setShowExternalUpdateBanner(true);
+              toast('Il file originale è stato modificato esternamente', 'info');
+            }
+          }
+        } catch (err) { }
+      })();
+    }, AUTO_REFRESH_INTERVAL);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [originalPath, originalFileHash, lastNotifiedExternalHash]);
+
+  const toast = (text: string, type: 'success' | 'error' | 'info' | 'loading' = 'info') => {
+    setToastMsg({ text, type });
+    if (type !== 'loading') {
+      setTimeout(() => setToastMsg(null), 3000);
+    }
+  };
+
+  const reloadFromExternal = async () => {
+    if (!originalPath) return;
+    try {
+      const content = await readFile(originalPath);
+      const file = new File([content], fileName);
+      await handleFile(file, originalPath);
+      toast('File ricaricato con le modifiche esterne', 'success');
+    } catch (err) {
+      console.error('Error reloading external file:', err);
+      toast('Errore nel ricaricare il file', 'error');
+    }
+  };
 
   const handleFile = async (file: File, path?: string | null) => {
     setFileName(file.name);
@@ -293,99 +293,73 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
     if (onFileSelected) onFileSelected(file.name, path || null);
     await saveExcelFile('sterlink', file, path).catch(err => console.error('Error saving file:', err));
 
-if (path) {
-        const hash = await calculateFileHash(path);
-        if (hash) {
-          setOriginalFileHash(hash);
-          await setExcelFileHash('sterlink', hash);
-        }
-        setShowExternalUpdateBanner(false);
+    if (path) {
+      const hash = await calculateFileHash(path);
+      if (hash) {
+        setOriginalFileHash(hash);
+        await setExcelFileHash('sterlink', hash);
       }
+      setShowExternalUpdateBanner(false);
+    }
 
     try {
-      const buffer = await file.arrayBuffer();
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(buffer);
-      await parseSheet(wb);
-      setView('table');
+      const response = await invoke<any>('read_excel_command', {
+        path: path || file.name,
+        typeHint: 'sterlink'
+      });
+
+      await processLoadedData(response.rows, response.columns);
       toast(`File caricato: ${file.name}`, 'success');
     } catch (err: any) {
-      toast(`Errore nel caricamento: ${err.message}`, 'error');
+      console.error('Error reading excel via python:', err);
+      toast(`Errore nel caricamento: ${err}`, 'error');
     }
   };
 
-  const formatDate = (d: any) => {
-    if (!d) return null;
-    const dt = new Date(d);
-    if (isNaN(dt.getTime())) return null;
-    const dd = String(dt.getDate()).padStart(2, '0');
-    const mm = String(dt.getMonth() + 1).padStart(2, '0');
-    return `${dd}/${mm}/${dt.getFullYear()}`;
-  };
+  const processLoadedData = async (rows: any[], fileColumns: string[]) => {
+    if (!rows || rows.length === 0) return;
 
-  const parseSheet = async (wb: any) => {
-    const ws = wb.worksheets[0]; // Prendi il primo foglio per Sterlink
-    const headerRow = ws.getRow(1);
-    const colCount = headerRow.cellCount;
+    // Ordina le colonne: NUMERO CHECKLIST o SERIALE all'inizio
+    const checklistCol = fileColumns.find(c => c.toUpperCase().includes('NUMERO') && c.toUpperCase().includes('CHECKLIST'));
+    const serialCol = fileColumns.find(c => c.toUpperCase().includes('SERIALE'));
+    const priority = checklistCol || serialCol || fileColumns[0];
 
-    const cols: string[] = [];
-    const colIndices: number[] = [];
+    const orderedCols = [
+      priority,
+      ...fileColumns.filter(c => c !== priority && !c.startsWith('_'))
+    ];
 
-    for (let c = 1; c <= colCount; c++) {
-      const cell = headerRow.getCell(c);
-      const header = cell.value;
-      if (header != null && String(header).trim() !== '') {
-        cols.push(String(header).trim());
-        colIndices.push(c - 1);
+    setDynamicCols(orderedCols);
+
+    const processedRows = rows.map((item: any) => {
+      // Verifica se la riga è vuota (basandoci sui primi 3 campi)
+      let filledCount = 0;
+      for (let i = 0; i < Math.min(3, orderedCols.length); i++) {
+        const val = item[orderedCols[i]];
+        if (val !== null && val !== '' && val !== 'null') filledCount++;
       }
+      const isEmpty = filledCount === 0;
+
+      return {
+        ...item,
+        _empty: isEmpty
+      };
+    });
+
+    // Rimuovi righe vuote in coda
+    while (processedRows.length > 0 && processedRows[processedRows.length - 1]._empty) {
+      processedRows.pop();
     }
 
-    if (cols.length === 0) throw new Error('Impossibile identificare le colonne');
-
-    setDynamicCols(cols);
-    const newRows: SterlinkRow[] = [];
-    const rowCount = ws.rowCount;
-
-    for (let r = 2; r <= rowCount; r++) {
-      const xlRow = ws.getRow(r);
-      let hasData = false;
-      for (let i = 0; i < Math.min(3, cols.length); i++) {
-        const cell = xlRow.getCell(colIndices[i] + 1);
-        const val = cell.value;
-        if (val != null && val !== '' && val !== 'null') {
-          hasData = true;
-          break;
-        }
-      }
-
-      if (!hasData) {
-        const emptyRow: SterlinkRow = { _empty: true };
-        for (const col of cols) emptyRow[col] = null;
-        newRows.push(emptyRow);
-        continue;
-      }
-
-      const row: SterlinkRow = { _empty: false };
-      for (let idx = 0; idx < cols.length; idx++) {
-        const col = cols[idx];
-        const cell = xlRow.getCell(colIndices[idx] + 1);
-        let value = cell.value;
-        if (value instanceof Date) value = formatDate(value);
-        else if (value !== null && value !== undefined) value = String(value);
-        else value = null;
-        row[col] = value;
-      }
-      newRows.push(row);
-    }
-
-    while (newRows.length > 0 && newRows[newRows.length - 1]._empty) newRows.pop();
-
-    setRows(newRows);
-    setOriginalRows(newRows);
+    setRows(processedRows);
+    setOriginalRows(processedRows);
     setHasUnsavedChanges(false);
-    await saveExcelDataJson('sterlink', newRows);
-    await setSetting('sterlink_original_rows_count', newRows.length);
-    await setSetting('sterlink_dynamic_cols', cols);
+    setView('table');
+
+    // Persistenza
+    await saveExcelDataJson('sterlink', processedRows);
+    await setSetting('sterlink_dynamic_cols', orderedCols);
+    await setSetting('sterlink_original_rows_count', processedRows.length);
   };
 
   const getVisibleRows = useCallback(() => {
@@ -436,16 +410,16 @@ if (path) {
       if (outputPath !== originalPath) {
         setOriginalPath(outputPath);
         if (onFileSelected) onFileSelected(fileName, outputPath);
-       }
-       
-       if (outputPath) {
-         const newHash = await calculateFileHash(outputPath);
-         if (newHash) {
-           setOriginalFileHash(newHash);
-           await setExcelFileHash('sterlink', newHash);
-           setShowExternalUpdateBanner(false);
-         }
-       }
+      }
+
+      if (outputPath) {
+        const newHash = await calculateFileHash(outputPath);
+        if (newHash) {
+          setOriginalFileHash(newHash);
+          await setExcelFileHash('sterlink', newHash);
+          setShowExternalUpdateBanner(false);
+        }
+      }
 
       setIsSaving(false);
       toast(result || 'Sincronizzazione completata!', 'success');
@@ -560,9 +534,9 @@ if (path) {
               <span className="text-[11px] text-neutral-600 dark:text-neutral-300 leading-tight">{e.value}</span>
             </div>
           ))}
-     </div>
-   );
-}
+        </div>
+      );
+    }
 
     const isSerial = header.toUpperCase().includes('SERIALE');
     const isVersion = header.toUpperCase().includes('VERSIONE') || header.toUpperCase().includes('SW');

@@ -18,7 +18,8 @@ pub fn run() {
         .setup(|_| Ok(()))
         .invoke_handler(tauri::generate_handler![
             crate::commands::save_pandetta_command,
-            crate::commands::save_sterlink_command
+            crate::commands::save_sterlink_command,
+            crate::commands::read_excel_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

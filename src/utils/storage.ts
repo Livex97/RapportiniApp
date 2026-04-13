@@ -3,6 +3,7 @@ import { writeFile, readFile, remove, BaseDirectory, mkdir, readDir } from '@tau
 import { getVersion } from '@tauri-apps/api/app';
 import { check } from '@tauri-apps/plugin-updater';
 import { listen } from '@tauri-apps/api/event';
+import { appDataDir, join } from '@tauri-apps/api/path';
 
 let _store: Store | null = null;
 
@@ -597,6 +598,14 @@ export async function clearExcelFile(type: 'pandetta' | 'sterlink') {
     } catch (e) {
         console.error(`[Storage] Error clearing ${type} file:`, e);
     }
+}
+
+/**
+ * Returns the absolute path of the cached Excel file in AppData
+ */
+export async function getCachedExcelFilePath(type: 'pandetta' | 'sterlink'): Promise<string> {
+    const appData = await appDataDir();
+    return await join(appData, 'excel', `${type}_data.xlsx`);
 }
 
 /**
