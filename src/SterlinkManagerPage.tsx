@@ -1,9 +1,9 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { FileSpreadsheet, Upload, Search, X, Plus, CheckCircle, AlertCircle, Edit2, Trash2, Loader2, ArrowLeft, Save } from 'lucide-react';
+import { FileSpreadsheet, Upload, Search, X, Plus, CheckCircle, AlertCircle, Edit2, Trash2, Loader2, Save } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { save, open, ask } from '@tauri-apps/plugin-dialog';
-import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting, getExcelFileHash, setExcelFileHash, getCachedExcelFilePath } from './utils/storage';
+import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting, getExcelFileHash, setExcelFileHash, getCachedExcelFilePath, clearExcelFile, getHasUnsavedChanges, setHasUnsavedChanges as saveHasUnsavedChanges } from './utils/storage';
 import { invoke } from '@tauri-apps/api/core';
 
 // --- Types ---
@@ -126,6 +126,7 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
   const [isDragging, setIsDragging] = useState(false);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' | 'loading' } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingFile, setIsLoadingFile] = useState(false);
   const [dynamicCols, setDynamicCols] = useState<string[]>([]);
   const [originalFileHash, setOriginalFileHash] = useState<string | null>(null);
   const [showExternalUpdateBanner, setShowExternalUpdateBanner] = useState(false);
@@ -178,7 +179,9 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
         if (jsonData && jsonData.length > 0) {
           setRows(jsonData);
           setOriginalRows(jsonData);
-          setHasUnsavedChanges(false);
+
+          const unsaved = await getHasUnsavedChanges('sterlink');
+          setHasUnsavedChanges(unsaved);
 
           const savedCols = await getSetting<string[]>('sterlink_dynamic_cols', []);
           if (savedCols.length > 0) {
@@ -288,6 +291,8 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
   };
 
   const handleFile = async (file: File, path?: string | null) => {
+    setIsLoadingFile(true);
+    toast('Caricamento file...', 'loading');
     setFileName(file.name);
     if (path) setOriginalPath(path);
     if (onFileSelected) onFileSelected(file.name, path || null);
@@ -310,9 +315,11 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
 
       await processLoadedData(response.rows, response.columns);
       toast(`File caricato: ${file.name}`, 'success');
+      setIsLoadingFile(false);
     } catch (err: any) {
       console.error('Error reading excel via python:', err);
       toast(`Errore nel caricamento: ${err}`, 'error');
+      setIsLoadingFile(false);
     }
   };
 
@@ -424,6 +431,7 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
       setIsSaving(false);
       toast(result || 'Sincronizzazione completata!', 'success');
       setHasUnsavedChanges(false);
+      await saveHasUnsavedChanges('sterlink', false);
     } catch (err: any) {
       console.error('Export error:', err);
       setIsSaving(false);
@@ -480,6 +488,7 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
     }
     setModalOpen(false);
     setHasUnsavedChanges(true);
+    saveHasUnsavedChanges('sterlink', true);
   };
 
   const deleteRow = async (idx: number, skipConfirmation = false) => {
@@ -496,6 +505,7 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
       return updated;
     });
     setHasUnsavedChanges(true);
+    saveHasUnsavedChanges('sterlink', true);
     toast('Riga eliminata', 'info');
   };
 
@@ -552,6 +562,14 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
   if (view === 'upload') {
     return (
       <div className={`flex-1 flex flex-col items-center justify-center py-12 px-4 animate-in fade-in slide-in-from-bottom-4 duration-500 ${className}`}>
+        {isLoadingFile && (
+          <div className="fixed inset-0 flex items-center justify-center bg-neutral-900/60 backdrop-blur-sm z-50">
+            <div className="flex flex-col items-center">
+              <Loader2 className="w-12 h-12 animate-spin text-white mb-4" />
+              <span className="text-white text-lg">Caricamento file...</span>
+            </div>
+          </div>
+        )}
         <div className="text-center mb-12">
           <h2 className="text-4xl font-extrabold text-neutral-900 dark:text-white mb-4">Sterlink Manager</h2>
           <p className="text-lg text-neutral-600 dark:text-neutral-400 max-w-2xl mx-auto">
@@ -594,6 +612,14 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
+      {isSaving && (
+        <div className="fixed inset-0 flex items-center justify-center bg-neutral-900/60 backdrop-blur-sm z-50">
+          <div className="flex flex-col items-center">
+            <Loader2 className="w-12 h-12 animate-spin text-white mb-4" />
+            <span className="text-white text-lg">Salvataggio in corso...</span>
+          </div>
+        </div>
+      )}
       {showExternalUpdateBanner && (
         <div className="fixed top-24 left-1/2 transform -translate-x-1/2 bg-yellow-100/90 backdrop-blur-md border border-yellow-400 text-yellow-800 p-4 rounded-2xl shadow-2xl z-50 max-w-md animate-in fade-in slide-in-from-top-4 duration-300">
           <div className="flex items-center gap-2 mb-2">
@@ -609,49 +635,84 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
       )}
 
       {/* Header Fisso */}
-      <div className="sticky top-16 z-20 flex flex-col gap-4 pt-4 pb-6 bg-transparent -mx-4 px-4 -mt-8">
-        <div className="flex items-center gap-4 p-4 bg-white/80 dark:bg-neutral-800/80 rounded-2xl shadow-sm border border-neutral-200/50 dark:border-neutral-700/50 backdrop-blur-md">
+      <div className="sticky top-16 z-20 flex flex-col gap-2 pt-3 pb-4 bg-neutral-50 dark:bg-neutral-900 -mx-4 px-4 -mt-8">
+        {/* Prima riga: tutto in un'unica riga compatta */}
+        <div className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-neutral-800 rounded-xl shadow-sm border border-neutral-200/50 dark:border-neutral-700/50">
+          <FileSpreadsheet className="w-5 h-5 text-blue-600 flex-shrink-0" />
+          <span className="px-2 py-0.5 text-xs font-mono bg-neutral-100 dark:bg-neutral-700/50 rounded text-neutral-600 dark:text-neutral-300 flex-shrink-0">{fileName}</span>
+
+          <div className="flex-1" />
+
           <div className="flex items-center gap-2 flex-shrink-0">
-            <FileSpreadsheet className="w-6 h-6 text-blue-600" />
-            {!searchTerm && (
-              <span className="px-2 py-1 text-xs font-mono bg-neutral-100 dark:bg-neutral-700/50 rounded text-neutral-600 dark:text-neutral-300 transition-all duration-300">{fileName}</span>
-            )}
+            <button
+              onClick={openNewRow}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-bold rounded-lg hover:scale-105 transition-transform text-xs"
+            >
+              <Plus className="w-3.5 h-3.5" /> Aggiungi Riga
+            </button>
+            <button
+              onClick={exportXlsx}
+              disabled={isSaving}
+              className={`flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 text-white font-bold rounded-lg shadow-lg shadow-primary-500/20 transition-all text-xs
+                 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'hover:bg-primary-700 hover:scale-105 active:scale-95'}`}
+            >
+              <Save className="w-3.5 h-3.5" />
+              Esporta Excel
+            </button>
+
+            <button
+              onClick={async () => {
+                const confirmed = await ask('Vuoi davvero rimuovere il file Excel persistente per Sterlink Manager? Dovrai caricarlo nuovamente per utilizzare la pagina.', {
+                  title: 'Ricarica File',
+                  kind: 'warning'
+                });
+
+                if (!confirmed) return;
+
+                setOriginalPath(null);
+                setFileName('Sterlink_Installate.xlsx');
+                setRows([]);
+                setDynamicCols([]);
+                setSearchTerm('');
+                setView('upload');
+                setHasUnsavedChanges(false);
+                await saveHasUnsavedChanges('sterlink', false);
+
+                await clearExcelFile('sterlink');
+                toast('Cache rimossa. Carica un nuovo file.', 'info');
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-600 rounded-lg text-xs font-medium transition-all duration-200 border border-neutral-300 dark:border-neutral-600 cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              Ricarica file
+            </button>
           </div>
-          <div className="flex-1 relative min-w-0">
+        </div>
+
+        {/* Seconda riga: barra di ricerca + stato */}
+        <div className="flex items-center justify-between px-3 py-2 bg-white dark:bg-neutral-800 rounded-xl border border-neutral-100 dark:border-neutral-700">
+          <div className="flex-1 relative max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
             <input
               type="text"
               placeholder="Cerca macchine, seriali, versioni..."
-              className="w-full pl-10 pr-10 py-2 bg-neutral-100 dark:bg-neutral-700/50 border-none rounded-xl text-sm focus:ring-2 focus:ring-primary-500 transition-all duration-300"
+              className="w-full pl-10 pr-10 py-2 bg-neutral-100 dark:bg-neutral-700/50 border-none rounded-lg text-sm focus:ring-2 focus:ring-primary-500 transition-all"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
             />
             {searchTerm && (
               <button
                 type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 hover:text-neutral-600 transition-all duration-300"
+                className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 hover:text-neutral-600 transition-all"
                 onClick={() => setSearchTerm('')}
               >
                 <X className="w-4 h-4" />
               </button>
             )}
           </div>
-          <div className="flex items-center gap-3 ml-auto">
-            <button
-              onClick={openNewRow}
-              className="flex items-center gap-2 px-4 py-2 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-bold rounded-xl hover:scale-105 transition-transform text-sm"
-            >
-              <Plus className="w-4 h-4" /> Aggiungi Macchina
-            </button>
-            <button
-              onClick={exportXlsx}
-              disabled={isSaving}
-              className={`flex items-center gap-2 px-6 py-2 bg-primary-600 text-white font-bold rounded-xl shadow-lg shadow-primary-500/20 transition-all text-sm
-                 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'hover:bg-primary-700 hover:scale-105 active:scale-95'}`}
-            >
-              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {isSaving ? 'Salvataggio...' : 'Sincronizza Excel'}
-            </button>
+
+          <div className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest whitespace-nowrap ml-4">
+            {hasUnsavedChanges ? <span className="text-amber-500">● Modifiche non salvate</span> : <span className="text-emerald-500">✓ Sincronizzato</span>}
           </div>
         </div>
       </div>
@@ -696,20 +757,6 @@ export default function SterlinkManagerPage({ onFileSelected, className = '' }: 
               <p className="text-sm font-medium">Nessuna macchina trovata</p>
             </div>
           )}
-        </div>
-      </div>
-
-      {/* Footer info */}
-      <div className="mt-auto px-4 py-3 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ArrowLeft className="w-3.5 h-3.5 text-neutral-400" />
-          <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Source:</span>
-          <span className="text-[10px] text-neutral-500 truncate font-mono max-w-sm">{originalPath || 'Cache locale'}</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest whitespace-nowrap">
-            {hasUnsavedChanges ? <span className="text-amber-500">● Modifiche non salvate</span> : <span className="text-emerald-500">✓ Sincronizzato</span>}
-          </div>
         </div>
       </div>
 

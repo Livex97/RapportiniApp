@@ -3,7 +3,7 @@ import { FileSpreadsheet, Upload, Download, Search, X, Plus, CheckCircle, AlertC
 import { listen } from '@tauri-apps/api/event';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { save, open, ask } from '@tauri-apps/plugin-dialog';
-import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting, clearExcelFile, getExcelFileHash, setExcelFileHash, getCachedExcelFilePath } from './utils/storage';
+import { saveExcelFile, getExcelFile, getExcelFilePath, saveExcelDataJson, getExcelDataJson, getExcelFileName, getSetting, setSetting, clearExcelFile, getExcelFileHash, setExcelFileHash, getCachedExcelFilePath, getHasUnsavedChanges, setHasUnsavedChanges as saveHasUnsavedChanges } from './utils/storage';
 import { invoke } from '@tauri-apps/api/core';
 
 // Tipi
@@ -139,7 +139,9 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
         if (jsonData && jsonData.length > 0) {
           setRows(jsonData);
           setOriginalRows(jsonData);
-          setHasUnsavedChanges(false);
+          
+          const unsaved = await getHasUnsavedChanges('pandetta');
+          setHasUnsavedChanges(unsaved);
           buildTecnicoColorMap(jsonData);
 
           const savedCols = await getSetting<string[]>('pandetta_dynamic_cols', []);
@@ -399,6 +401,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
     setRows(processedRows);
     setOriginalRows(processedRows);
     setHasUnsavedChanges(false);
+    await saveHasUnsavedChanges('pandetta', false);
     buildTecnicoColorMap(processedRows);
     setView('table');
 
@@ -488,6 +491,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
       setIsSaving(false);
       toast(result || 'Sincronizzazione completata!', 'success');
       setHasUnsavedChanges(false);
+      await saveHasUnsavedChanges('pandetta', false);
     } catch (err: any) {
       console.error('Export error:', err);
       setIsSaving(false);
@@ -560,6 +564,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
     }
     setModalOpen(false);
     setHasUnsavedChanges(true);
+    saveHasUnsavedChanges('pandetta', true);
   };
 
   const deleteRow = async (idx: number, closeModalAfter = false) => {
@@ -574,6 +579,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
       return updated;
     });
     setHasUnsavedChanges(true);
+    saveHasUnsavedChanges('pandetta', true);
     toast('Riga eliminata', 'info');
     if (closeModalAfter) {
       setModalOpen(false);
@@ -705,6 +711,14 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
+      {isSaving && (
+        <div className="fixed inset-0 flex items-center justify-center bg-neutral-900/60 backdrop-blur-sm z-50">
+          <div className="flex flex-col items-center">
+            <Loader2 className="w-12 h-12 animate-spin text-white mb-4" />
+            <span className="text-white text-lg">Salvataggio in corso...</span>
+          </div>
+        </div>
+      )}
       {showExternalUpdateBanner && (
         <div className="fixed top-24 left-1/2 transform -translate-x-1/2 bg-yellow-100/90 backdrop-blur-md border border-yellow-400 text-yellow-800 p-4 rounded-2xl shadow-2xl z-50 max-w-md animate-in fade-in slide-in-from-top-4 duration-300">
           <div className="flex items-center gap-2 mb-2">
@@ -813,8 +827,8 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
             disabled={isSaving}
             className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
           >
-            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            {isSaving ? 'Salvataggio in corso...' : 'Esporta Excel'}
+            <Download className="w-4 h-4" />
+            Esporta Excel
           </button>
 
           <button
@@ -835,6 +849,7 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, cla
               setSearchTerm('');
               setView('upload');
               setHasUnsavedChanges(false);
+              await saveHasUnsavedChanges('pandetta', false);
 
   try {
     // processing...

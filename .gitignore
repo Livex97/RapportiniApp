@@ -40,3 +40,14 @@ push-release.cjs
 
 # Build artifacts
 /build
+
+# Backup e file temporanei
+*.fld/
+test-pdf-output.txt
+test-pdf.cjs
+parsePdf.js
+# Build specifici
+save_pandetta.spec
+save_pandetta-aarch64-apple-darwin.spec
+save_sterlink-aarch64-apple-darwin.spec
+read_excel-aarch64-apple-darwin.spec

@@ -679,3 +679,25 @@ export async function setExcelFileHash(type: 'pandetta' | 'sterlink', hash: stri
         console.error(`[Storage] Error saving ${type} file hash:`, e);
     }
 }
+
+/**
+ * Gets the hasUnsavedChanges flag for an Excel manager
+ */
+export async function getHasUnsavedChanges(type: 'pandetta' | 'sterlink'): Promise<boolean> {
+    const store = await getStore();
+    const val = await store.get<boolean>(`${type}_has_unsaved_changes`);
+    return val !== null && val !== undefined ? val : false;
+}
+
+/**
+ * Saves the hasUnsavedChanges flag for an Excel manager
+ */
+export async function setHasUnsavedChanges(type: 'pandetta' | 'sterlink', value: boolean): Promise<void> {
+    try {
+        const store = await getStore();
+        await store.set(`${type}_has_unsaved_changes`, value);
+        await store.save();
+    } catch (e) {
+        console.error(`[Storage] Error saving ${type} hasUnsavedChanges:`, e);
+    }
+}
