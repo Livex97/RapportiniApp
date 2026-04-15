@@ -128,8 +128,7 @@ function App() {
   const [pandettaFilePath, setPandettaFilePath] = useState<string | null>(null);
   const [sterlinkFileName, setSterlinkFileName] = useState<string | null>(null);
   const [sterlinkFilePath, setSterlinkFilePath] = useState<string | null>(null);
-  const [pendingPandettaRow, setPendingPandettaRow] = useState<any>(null);
-  const [pandettaRowVersion, setPandettaRowVersion] = useState<number>(0);
+  const [pendingPandettaRows, setPendingPandettaRows] = useState<any[]>([]);
   const actionLock = useRef(false);
 
 
@@ -851,8 +850,7 @@ function App() {
   };
 
   const handleAddToPandetta = (data: any) => {
-    setPendingPandettaRow(data);
-    setPandettaRowVersion(v => v + 1);
+    setPendingPandettaRows(prev => [...prev, data]);
   };
 
   const handleGenerate = () => {
@@ -2680,7 +2678,8 @@ className={getNavClasses('settings')}
                 setPandettaFileName(null);
                 setPandettaFilePath(null);
               }}
-              onExternalAddRow={pandettaRowVersion > 0 ? pendingPandettaRow : null}
+              onExternalAddRow={pendingPandettaRows}
+              onExternalRowsProcessed={() => setPendingPandettaRows([])}
             />
           </div>
         )}

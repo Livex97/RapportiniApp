@@ -19,7 +19,8 @@ interface PandettaRow {
 interface PandettaManagerProps {
   onFileSelected?: (name: string, path: string | null) => void;
   onResetPersistent?: () => Promise<void> | void;
-  onExternalAddRow?: ExtractedData | null;
+  onExternalAddRow?: ExtractedData[] | null;
+  onExternalRowsProcessed?: () => void;
   className?: string;
 }
 
@@ -69,7 +70,7 @@ interface TecnicoColor {
   export: string;
 }
 
-export default function PandettaManager({ onFileSelected, onResetPersistent, onExternalAddRow, className = '' }: PandettaManagerProps) {
+export default function PandettaManager({ onFileSelected, onResetPersistent, onExternalAddRow, onExternalRowsProcessed, className = '' }: PandettaManagerProps) {
   const [view, setView] = useState<ViewState>('upload');
   const [rows, setRows] = useState<PandettaRow[]>([]);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -250,20 +251,14 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
     }
   };
 
-  const [lastProcessedExternalRow, setLastProcessedExternalRow] = useState<string>('');
+  const [lastProcessedExternalRows, setLastProcessedExternalRows] = useState<string[]>([]);
 
   // Handle external row add from AIExtraction
   useEffect(() => {
-    if (!onExternalAddRow || view !== 'table') return;
+    if (!onExternalAddRow || onExternalAddRow.length === 0 || view !== 'table') return;
     
-    // Create a unique key for this row to avoid duplicates
-    const rowKey = `${onExternalAddRow.data}-${onExternalAddRow.cliente}-${onExternalAddRow.strumentoDaRiparare}`;
-    
-    // Skip if we've already processed this exact row
-    if (rowKey === lastProcessedExternalRow) return;
-    
-    setLastProcessedExternalRow(rowKey);
-    const data = onExternalAddRow;
+    const newRows: PandettaRow[] = [];
+    const processedKeys: string[] = [];
     
     const rifCol = dynamicCols.find(c => c.toUpperCase().includes('RIF') && c.toUpperCase().includes('PANDETTA'))
       || dynamicCols.find(c => c.toUpperCase().includes('RIF'))
@@ -271,39 +266,61 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
 
     const statoColName = dynamicCols.find(c => c.toUpperCase().includes('STATO') && c.toUpperCase().includes('INTERVENTO')) || 'STATO INTERVENTO';
 
-    const nextRif = Math.max(0, ...rows.filter(r => !r._empty).map(r => {
+    let currentRif = Math.max(0, ...rows.filter(r => !r._empty).map(r => {
       const val = r[rifCol];
       return val != null ? parseInt(String(val)) || 0 : 0;
-    })) + 1;
+    }));
 
-    const newRow: PandettaRow = {
-      [rifCol]: nextRif,
-      'DATA': data.data || '',
-      'CLIENTE': data.cliente || '',
-      'UBICAZIONE': data.ubicazione || '',
-      'STRUMENTO DA RIPARARE': data.strumentoDaRiparare || '',
-      "TIPO DI ATTIVITA'/GUASTO": data.tipoDiAttivitaGuasto || '',
-      'TECNICO': data.tecnico || '',
-      [statoColName]: 'APERTO',
-      _status: 'aperta',
-      _empty: false,
-      _new: true
-    };
+    for (const data of onExternalAddRow) {
+      // Create a unique key for this row to avoid duplicates
+      const rowKey = `${data.data}-${data.cliente}-${data.strumentoDaRiparare}`;
+      
+      // Skip if we've already processed this exact row
+      if (lastProcessedExternalRows.includes(rowKey)) continue;
+      
+      processedKeys.push(rowKey);
+      currentRif += 1;
+    
+      const newRow: PandettaRow = {
+        [rifCol]: currentRif,
+        'DATA': data.data || '',
+        'CLIENTE': data.cliente || '',
+        'UBICAZIONE': data.ubicazione || '',
+        'STRUMENTO DA RIPARARE': data.strumentoDaRiparare || '',
+        "TIPO DI ATTIVITA'/GUASTO": data.tipoDiAttivitaGuasto || '',
+        'TECNICO': data.tecnico || '',
+        [statoColName]: 'APERTO',
+        _status: 'aperta',
+        _empty: false,
+        _new: true
+      };
 
-    dynamicCols.forEach(col => {
-      if (!(col in newRow)) newRow[col] = null;
-    });
+      dynamicCols.forEach(col => {
+        if (!(col in newRow)) newRow[col] = null;
+      });
 
+      newRows.push(newRow);
+    }
+
+    if (newRows.length === 0) return;
+
+    setLastProcessedExternalRows(prev => [...prev, ...processedKeys]);
+    
     setRows(prev => {
-      const updated = [...prev, newRow];
+      const updated = [...prev, ...newRows];
       buildTecnicoColorMap(updated);
       saveExcelDataJson('pandetta', updated);
       return updated;
     });
     setHasUnsavedChanges(true);
     saveHasUnsavedChanges('pandetta', true);
-    toast('Nuovo intervento aggiunto dalla AI!', 'success');
-  }, [onExternalAddRow, view, dynamicCols, rows, lastProcessedExternalRow]);
+    
+    if (onExternalRowsProcessed) {
+      onExternalRowsProcessed();
+    }
+    
+    toast(`${newRows.length} nuovo${newRows.length > 1 ? 'i' : ''} intervento${newRows.length > 1 ? 'i' : ''} aggiunto${newRows.length > 1 ? 'i' : ''} dalla AI!`, 'success');
+  }, [onExternalAddRow, view, dynamicCols, rows, lastProcessedExternalRows]);
 
   const reloadFromExternal = async () => {
     if (!originalPath) return;
