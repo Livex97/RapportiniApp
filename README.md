@@ -1,156 +1,107 @@
-# 📋 TekReport Pro
+# 📋 TekReport Pro
 
-> **Applicazione desktop** per la compilazione automatica di rapportini tecnici, disponibile su **Windows**, **macOS** (Intel e Apple Silicon) e **Linux**.
+> **TekReport Pro** è una suite desktop avanzata per la gestione tecnica, la compilazione automatica di rapportini e la manutenzione di database riparazioni. Sviluppata con **Tauri**, **React** e **Python**, è disponibile per **Windows**, **macOS** (Intel/Apple Silicon) e **Linux**.
 
 ---
 
 ## 📖 Descrizione
 
-**TekReport Pro** permette di:
-- **Caricare** fino a tre template DOCX personalizzati.
-- **Estrarre** i segnaposti `{CAMPO}` presenti nei template.
-- **Importare** dati da PDF (DDT, ordini, ecc.) e compilare automaticamente i campi corrispondenti.
-- **Gestire** checkbox native di Word e aggiungere righe dinamiche per articoli aggiuntivi.
-- **Salvare** localmente i template mediante IndexedDB (archiviazione offline).
-- **Generare** il documento finale in formato DOCX pronto per stampa o invio.
-
-L’intera elaborazione avviene **offline**, senza inviare dati a server esterni.
+TekReport Pro non è solo un generatore di documenti, ma un ecosistema completo per l'automazione del flusso di lavoro tecnico:
+- **Generazione Rapportini**: Compila template Word (.docx/.doc) partendo da dati estratti da PDF o inseriti manualmente.
+- **Smart Data Extraction**: Motore AI integrato (Ollama) per estrarre informazioni da email e documenti complessi.
+- **Database Management**: Gestione avanzata di file Excel (Pandetta e Sterlink) tramite core Python dedicato per la massima affidabilità.
+- **Pianificazione**: Integrazione bidirezionale con Google Calendar per la gestione degli interventi.
+- **Archiviazione Nativa**: I dati e i template sono salvati localmente nel file system di sistema (AppData), garantendo persistenza e sicurezza.
 
 ---
 
 ## ✨ Funzionalità principali
 
-| Funzione | Descrizione |
+| Modulo | Descrizione |
 |---|---|
-| 📁 **Gestione template** | Carica e salva fino a tre template DOCX in slot predefiniti. |
-| 🔍 **Estrazione campi** | Rileva automaticamente tutti i segnaposti `{CAMPO}` nel template. |
-| 📄 **Import da PDF** | Legge DDT/ordini PDF e compila i campi corrispondenti. |
-| ☑️ **Checkbox Word** | Gestisce le checkbox native di Word come opzioni selezionabili. |
-| 📝 **Righe dinamiche** | Aggiunge automaticamente righe articolo se il PDF contiene più voci del template. |
-| 💾 **Persistenza locale** | I template sono salvati in IndexedDB e disponibili ad ogni avvio. |
-| ⬇️ **Export DOCX** | Genera e scarica il rapportino compilato in formato Word. |
+| 🏠 **Dashboard Home** | Accesso rapido a tutte le funzioni principali dell'app. |
+| 📄 **Rapportino Pro** | Supporto per template DOCX e legacy DOC (auto-conversione). Estrazione campi `{CAMPO}` e checkbox native. |
+| 🧠 **Estrazione AI** | Utilizza Ollama localmente per analizzare PDF e email, trasformandoli in dati strutturati. |
+| 📊 **Pandetta Manager** | Gestione elenco assistenze su Excel con supporto a righe dinamiche e salvataggio persistente. |
+| 🛠️ **Sterlink Manager** | Database dedicato per la gestione delle riparazioni e dei materiali. |
+| 📅 **Calendario Google** | Sincronizzazione automatica degli interventi con Google Calendar. |
+| ⚙️ **Settings Tabbed** | Configurazione modulare di: Percorsi, Tecnici, API AI, Google Auth e Update. |
+| 💾 **Backup & Restore** | Esportazione e importazione completa di tutte le impostazioni e dei template. |
 
 ---
 
-## 💻 Download e installazione
+## 🚀 Guida all'utilizzo
 
-Vai alla sezione **Releases** del repository e scarica l’installer per il tuo sistema operativo:
+### 1. Configurazione Iniziale
+- Apri le **⚙️ Impostazioni** e configura la cartella di destinazione dei rapportini.
+- Aggiungi i nomi dei tecnici che utilizzeranno l'app.
+- Carica i tuoi template Word negli slot dedicati (Tab Modelli).
 
-| Sistema operativo | File da scaricare |
-|---|---|
-| **Windows** | `TekReportPro_x.x.x_x64.msi` o `.exe` |
-| **macOS (Apple Silicon)** | `TekReportPro_x.x.x_aarch64.dmg` |
-| **macOS (Intel)** | `TekReportPro_x.x.x_x64.dmg` |
-| **Linux (Ubuntu/Debian)** | `TekReportPro_x.x.x_amd64.deb` |
-| **Linux (generico)** | `TekReportPro_x.x.x_amd64.AppImage` |
+### 2. Generazione Rapportini
+- Scegli un template dalla **Dashboard** o dalla sezione **Modelli**.
+- L'app estrarrà automaticamente i segnaposti.
+- Puoi caricare un PDF per auto-compilare i campi o usare l'**Estrazione AI** per dati più complessi.
+- Il sistema calcola automaticamente il prossimo numero documento basandosi sui file già esistenti nella cartella.
 
-> **Nota macOS**: se compare l’avviso “Apple non può verificare questa app”, apri **Impostazioni di Sistema → Privacy e Sicurezza** e scegli **“Apri comunque”**.
-
-> **Nota Linux (AppImage)**: rendi il file eseguibile con `chmod +x TekReportPro_*.AppImage` prima di avviarlo.
-
----
-
-## 🚀 Guida all’utilizzo
-
-### 1️⃣ Prima configurazione – Carica i template
-1. Avvia l’app.
-2. Apri **⚙️ Impostazioni** (icona ingranaggio in alto a destra).
-3. Troverai tre slot per i template; per ciascuno clicca **Upload** e seleziona il file `.docx`.
-4. Dopo il caricamento, lo slot mostrerà il nome del file.
-
-> I template sono salvati localmente e saranno disponibili ad ogni riapertura dell’app.
-
-### 2️⃣ Schermata Home – Seleziona il template
-1. Nella schermata principale, scegli il template desiderato.
-2. L’app ti porterà automaticamente al modulo di compilazione.
-
-### 3️⃣ Compilazione del modulo
-#### • Manuale
-- I campi estratti dal template compaiono come caselle di testo.
-- Le checkbox native di Word sono presentate come selettori.
-- Compila i valori e premi **Genera DOCX**.
-
-#### • Auto‑compilazione da PDF
-1. Nella schermata del modulo, premi **Carica PDF**.
-2. Seleziona il DDT o l’ordine da cui estrarre i dati.
-3. L’app legge il PDF e compila automaticamente:
-   - Ragione sociale, indirizzo, CAP, città del destinatario
-   - Numero richiesta/DDT e data
-   - Reparto/ambulatorio di destinazione
-   - Elenco articoli (descrizione, quantità) – con aggiunta di righe se necessario
-4. Verifica e correggi eventuali valori errati.
-5. Premi **Genera DOCX** per scaricare il documento finale.
-
-### 4️⃣ Download del rapportino
-- Il file verrà salvato nella cartella **Download** con nome basato sul template scelto.
+### 3. Gestione Database (Pandetta/Sterlink)
+- Trascina il tuo file Excel nel manager corrispondente.
+- L'app crea una cache locale per operare in velocità e sovrascrive il file originale in modo sicuro solo al salvataggio.
+- Utilizza i filtri avanzati per cercare interventi passati.
 
 ---
 
-## 🛠️ Sviluppo locale
+## 🏗️ Architettura Tecnica
+
+L'app utilizza un'architettura **Sidecar** per combinare la velocità di una UI web con la potenza del calcolo nativo:
+- **Frontend**: React 19 + TypeScript + Tailwind CSS 4.
+- **Backend Host**: Tauri 2.0 (Rust).
+- **Processing Engine**: Python 3.12 (compilato in binari nativi) per il parsing Excel complesso.
+- **AI Engine**: Ollama (locale) tramite API REST.
+- **Storage**: Plugin Store (JSON) e Plugin FS (Binari) nativi di Tauri.
+
+---
+
+## 🛠️ Sviluppo Locale
 
 ### Prerequisiti
-- **Node.js** v18 o superiore
-- **Rust** (toolchain stabile) – `rustup toolchain install stable`
-- **Linux**: dipendenze di sistema per WebKit (`libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, `patchelf`)
+- **Node.js** v20+
+- **Rust** 1.75+
+- **Python 3.12** (per la build dei binari sidecar)
 
-### Avvio in modalità sviluppo
+### Setup
 ```bash
-# Clona il repository
-git clone https://github.com/YourOrg/TekReportPro.git
-cd TekReportPro
-
-# Installa le dipendenze Node
+# Installa dipendenze Node
 npm install
 
-# Avvia con hot‑reload
+# Installa dipendenze Python per i binari
+make install
+
+# Genera i binari sidecar per la tua piattaforma
+make build
+```
+
+### Avvio
+```bash
+# Frontend + Tauri Dev
 npm run tauri dev
 ```
 
-### Compilazione per distribuzione
-```bash
-# Genera gli installer per la piattaforma corrente
-npm run tauri build
-```
-Gli installer verranno creati in `src-tauri/target/release/bundle/`.
-
 ---
 
-## 🤖 Build automatiche (GitHub Actions)
+## 📦 Build e Release
 
-Il repository contiene un workflow **GitHub Actions** che compila l’app per tutte le piattaforme.
+### Script di utilità
+L'app include strumenti per la gestione automatizzata del ciclo di vita:
+- **`npm run build:binaries`**: Compila gli script Python in eseguibili nella cartella `src-tauri/binaries`.
+- **`node bump-version.cjs --set=X.X.X`**: Aggiorna sincronizzatamente la versione in tutti i file di config (package, cargo, tauri).
+- **`node push-release.cjs`**: Crea il tag git e avvia la pipeline di build su GitHub.
 
-### Creare una nuova release
-1. Accertati che tutte le modifiche siano commitate su `main`.
-2. Crea un tag di versione, ad esempio `v1.2.0`:
-   ```bash
-   git tag v1.2.0
-   git push origin v1.2.0
-   ```
-3. Il workflow partirà automaticamente e, al termine (~15‑20 min), creerà una **Draft Release** con gli installer allegati.
-4. Aggiungi note di rilascio e pubblica la release.
-
----
-
-## 📁 Struttura del progetto
-```
-TekReportPro/
-├─ src/                     # Codice React + TypeScript
-│   ├─ App.tsx
-│   ├─ utils/               # Parser DOCX, PDF, ecc.
-│   └─ …
-├─ src-tauri/               # Configurazione e codice Rust (Tauri)
-│   ├─ tauri.conf.json
-│   ├─ icons/
-│   └─ src/
-├─ .github/
-│   └─ workflows/
-│       └─ build-tauri.yml
-├─ public/                  # Asset statici
-└─ index.html               # Entry point HTML
-```
+### CI/CD
+Il workflow **GitHub Actions** compila automaticamente i pacchetti (MSI, DMG, DEB, AppImage) e crea una release ad ogni nuovo tag `v*`.
 
 ---
 
 ## 📄 Licenza
 
-Questo progetto è distribuito sotto licenza **MIT**. Vedi il file `LICENSE` per i dettagli.
+Distribuito sotto licenza **MIT**. 2026 © TekReport Team.
+
