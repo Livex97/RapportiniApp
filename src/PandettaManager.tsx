@@ -588,15 +588,35 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
     setEditingIdx(null);
     setIsNew(true);
 
-    // Trova la colonna RIF dinamicamente
     const rifCol = dynamicCols.find(c => c.toUpperCase().includes('RIF') && c.toUpperCase().includes('PANDETTA'))
       || dynamicCols.find(c => c.toUpperCase().includes('RIF'))
       || 'N.RIF PANDETTA';
 
-    const nextRif = Math.max(0, ...rows.filter(r => !r._empty).map(r => {
-      const val = r[rifCol];
-      return val != null ? parseInt(String(val)) || 0 : 0;
-    })) + 1;
+    const existingRifs = rows
+      .filter(r => !r._empty)
+      .map(r => {
+        const val = r[rifCol];
+        return val != null ? parseInt(String(val)) || 0 : 0;
+      })
+      .filter(n => n > 0);
+
+    let nextRif: number = 1;
+    if (existingRifs.length === 0) {
+      nextRif = 1;
+    } else {
+      const sortedRifs = [...existingRifs].sort((a, b) => a - b);
+      let foundGap = false;
+      for (let i = 0; i < sortedRifs.length - 1; i++) {
+        if (sortedRifs[i + 1] !== sortedRifs[i] + 1) {
+          nextRif = sortedRifs[i] + 1;
+          foundGap = true;
+          break;
+        }
+      }
+      if (!foundGap) {
+        nextRif = sortedRifs[sortedRifs.length - 1] + 1;
+      }
+    }
 
     const emptyRow: Partial<PandettaRow> = {
       [rifCol]: nextRif,
@@ -616,7 +636,41 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
   };
 
   const saveRow = () => {
-    // Validazione: Stato Intervento obbligatorio se presente nel form
+    const rifCol = dynamicCols.find(c => c.toUpperCase().includes('RIF') && c.toUpperCase().includes('PANDETTA'))
+      || dynamicCols.find(c => c.toUpperCase().includes('RIF'))
+      || 'N.RIF PANDETTA';
+
+    const currentRif = formData[rifCol];
+    const currentRifNum = currentRif != null ? parseInt(String(currentRif)) || 0 : 0;
+
+    if (currentRifNum > 0) {
+      const existingRifs = rows
+        .filter((r, i) => !r._empty && (editingIdx === null || i !== editingIdx))
+        .map(r => {
+          const val = r[rifCol];
+          return val != null ? parseInt(String(val)) || 0 : 0;
+        })
+        .filter(n => n > 0);
+
+      if (existingRifs.includes(currentRifNum)) {
+        const sortedRifs = [...existingRifs, currentRifNum].sort((a, b) => a - b);
+        let suggestedRif = 1;
+        let foundGap = false;
+        for (let i = 0; i < sortedRifs.length - 1; i++) {
+          if (sortedRifs[i + 1] !== sortedRifs[i] + 1) {
+            suggestedRif = sortedRifs[i] + 1;
+            foundGap = true;
+            break;
+          }
+        }
+        if (!foundGap) {
+          suggestedRif = sortedRifs[sortedRifs.length - 1] + 1;
+        }
+        setValidationError(`Il numero N.RIF ${currentRifNum} è già presente. Usa un numero diverso o accetta la proposta: ${suggestedRif}`);
+        return;
+      }
+    }
+
     if (statoColName && !formData[statoColName]) {
       setValidationError('Il campo "STATO INTERVENTO" è obbligatorio per poter salvare la riga.');
       return;
@@ -631,7 +685,26 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
 
     if (isNew) {
       setRows(prev => {
-        const updated = [...prev, newRow];
+        const rifCol = dynamicCols.find(c => c.toUpperCase().includes('RIF') && c.toUpperCase().includes('PANDETTA'))
+          || dynamicCols.find(c => c.toUpperCase().includes('RIF'))
+          || 'N.RIF PANDETTA';
+        const newRifNum = formData[rifCol] != null ? parseInt(String(formData[rifCol])) || 0 : 0;
+
+        let insertIdx = prev.length;
+        if (newRifNum > 0) {
+          for (let i = 0; i < prev.length; i++) {
+            if (prev[i]._empty) continue;
+            const existingRif = prev[i][rifCol];
+            const existingNum = existingRif != null ? parseInt(String(existingRif)) || 0 : 0;
+            if (existingNum > newRifNum) {
+              insertIdx = i;
+              break;
+            }
+          }
+        }
+
+        const updated = [...prev];
+        updated.splice(insertIdx, 0, newRow);
         buildTecnicoColorMap(updated);
         saveExcelDataJson('pandetta', updated);
         return updated;
@@ -1132,7 +1205,6 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
                   </div>
                   <div className="flex-1">
                     <p className="text-sm font-bold text-red-800 dark:text-red-200">{validationError}</p>
-                    <p className="text-xs text-red-600 dark:text-red-400 opacity-80">Inserisci un valore nel campo evidenziato per procedere.</p>
                   </div>
                   <button
                     onClick={() => setValidationError(null)}
@@ -1174,6 +1246,33 @@ export default function PandettaManager({ onFileSelected, onResetPersistent, onE
 
               {/* Form Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                {/* N.RIF Field - always editable */}
+                {(() => {
+                  const rifCol = dynamicCols.find(c => c.toUpperCase().includes('RIF') && c.toUpperCase().includes('PANDETTA'))
+                    || dynamicCols.find(c => c.toUpperCase().includes('RIF'))
+                    || 'N.RIF PANDETTA';
+                  const rifValue = formData[rifCol] || '';
+                  const isRifError = validationError && validationError.startsWith('Il numero N.RIF');
+                  return (
+                    <div key={rifCol} className="flex flex-col gap-1.5">
+                      <label className="text-[11px] font-black uppercase tracking-widest text-neutral-400 px-1">
+                        {getColLabel(rifCol)}
+                      </label>
+                      <input
+                        type="number"
+                        value={rifValue}
+                        onChange={(e) => setFormData({ ...formData, [rifCol]: e.target.value })}
+                        className={`w-full px-4 py-3 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 transition-all outline-none ${
+                          isRifError
+                            ? 'bg-red-50 dark:bg-red-900/20 border-2 border-red-500 focus:bg-white dark:focus:bg-neutral-800 ring-4 ring-red-500/10'
+                            : 'bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 focus:bg-white dark:focus:bg-neutral-800'
+                        }`}
+                        placeholder="Numero RIF..."
+                      />
+                    </div>
+                  );
+                })()}
+
                 {dynamicCols.map(col => {
                   if (col.toUpperCase() === 'N.RIF PANDETTA' || col.toUpperCase() === 'N.RIF') return null;
 

@@ -135,6 +135,7 @@ export default function SterlinkManagerPage({ onFileSelected, onResetPersistent,
   const [lastNotifiedExternalHash, setLastNotifiedExternalHash] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [originalRows, setOriginalRows] = useState<SterlinkRow[]>([]);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const AUTO_REFRESH_INTERVAL = 8000;
 
   const calculateFileHash = async (filePath: string): Promise<string | null> => {
@@ -460,10 +461,31 @@ export default function SterlinkManagerPage({ onFileSelected, onResetPersistent,
       || dynamicCols.find(c => c.toUpperCase().includes('SERIALE'))
       || dynamicCols[0];
 
-    const nextId = Math.max(0, ...rows.filter(r => !r._empty).map(r => {
-      const val = r[idCol];
-      return val != null ? parseInt(String(val)) || 0 : 0;
-    })) + 1;
+    const existingNums = rows
+      .filter(r => !r._empty)
+      .map(r => {
+        const val = r[idCol];
+        return val != null ? parseInt(String(val)) || 0 : 0;
+      })
+      .filter(n => n > 0);
+
+    let nextId: number = 1;
+    if (existingNums.length === 0) {
+      nextId = 1;
+    } else {
+      const sortedNums = [...existingNums].sort((a, b) => a - b);
+      let foundGap = false;
+      for (let i = 0; i < sortedNums.length - 1; i++) {
+        if (sortedNums[i + 1] !== sortedNums[i] + 1) {
+          nextId = sortedNums[i] + 1;
+          foundGap = true;
+          break;
+        }
+      }
+      if (!foundGap) {
+        nextId = sortedNums[sortedNums.length - 1] + 1;
+      }
+    }
 
     const emptyRow: Partial<SterlinkRow> = {
       [idCol]: nextId,
@@ -474,10 +496,46 @@ export default function SterlinkManagerPage({ onFileSelected, onResetPersistent,
       if (!(col in emptyRow)) emptyRow[col] = null;
     });
     setFormData(emptyRow);
+    setValidationError(null);
     setModalOpen(true);
   };
 
   const saveRow = () => {
+    const idCol = dynamicCols.find(c => c.toUpperCase().includes('NUMERO') && c.toUpperCase().includes('CHECKLIST'))
+      || dynamicCols.find(c => c.toUpperCase().includes('SERIALE'))
+      || dynamicCols[0];
+
+    const currentId = formData[idCol];
+    const currentIdNum = currentId != null ? parseInt(String(currentId)) || 0 : 0;
+
+    if (currentIdNum > 0) {
+      const existingNums = rows
+        .filter((r, i) => !r._empty && (editingIdx === null || i !== editingIdx))
+        .map(r => {
+          const val = r[idCol];
+          return val != null ? parseInt(String(val)) || 0 : 0;
+        })
+        .filter(n => n > 0);
+
+      if (existingNums.includes(currentIdNum)) {
+        const sortedNums = [...existingNums, currentIdNum].sort((a, b) => a - b);
+        let suggestedId = 1;
+        let foundGap = false;
+        for (let i = 0; i < sortedNums.length - 1; i++) {
+          if (sortedNums[i + 1] !== sortedNums[i] + 1) {
+            suggestedId = sortedNums[i] + 1;
+            foundGap = true;
+            break;
+          }
+        }
+        if (!foundGap) {
+          suggestedId = sortedNums[sortedNums.length - 1] + 1;
+        }
+        setValidationError(`Il numero ${idCol} ${currentIdNum} è già presente. Usa un numero diverso o accetta la proposta: ${suggestedId}`);
+        return;
+      }
+    }
+
     const newRow: SterlinkRow = {
       ...formData as Record<string, any>,
       _empty: false
@@ -485,7 +543,20 @@ export default function SterlinkManagerPage({ onFileSelected, onResetPersistent,
 
     if (isNew) {
       setRows(prev => {
-        const updated = [...prev, newRow];
+        let insertIdx = prev.length;
+        if (currentIdNum > 0) {
+          for (let i = 0; i < prev.length; i++) {
+            if (prev[i]._empty) continue;
+            const existingId = prev[i][idCol];
+            const existingNum = existingId != null ? parseInt(String(existingId)) || 0 : 0;
+            if (existingNum > currentIdNum) {
+              insertIdx = i;
+              break;
+            }
+          }
+        }
+        const updated = [...prev];
+        updated.splice(insertIdx, 0, newRow);
         saveExcelDataJson('sterlink', updated);
         return updated;
       });
@@ -815,8 +886,54 @@ export default function SterlinkManagerPage({ onFileSelected, onResetPersistent,
               <button onClick={() => setModalOpen(false)} className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-full transition-all"><X className="w-6 h-6 text-neutral-400" /></button>
             </div>
             <div className="p-8 overflow-y-auto flex-1 custom-scrollbar">
+              {validationError && (
+                <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-800 rounded-2xl flex items-center gap-3 animate-in slide-in-from-top-4 duration-300">
+                  <div className="w-10 h-10 bg-red-100 dark:bg-red-900/50 rounded-xl flex items-center justify-center shrink-0">
+                    <AlertCircle className="w-6 h-6 text-red-600 dark:text-red-400" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-red-800 dark:text-red-200">{validationError}</p>
+                  </div>
+                  <button
+                    onClick={() => setValidationError(null)}
+                    className="p-1 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-full transition-colors"
+                  >
+                    <X className="w-4 h-4 text-neutral-400" />
+                  </button>
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {dynamicCols.map(col => {
+                {/* ID Column Field - always editable */}
+                {(() => {
+                  const idCol = dynamicCols.find(c => c.toUpperCase().includes('NUMERO') && c.toUpperCase().includes('CHECKLIST'))
+                    || dynamicCols.find(c => c.toUpperCase().includes('SERIALE'))
+                    || dynamicCols[0];
+                  const idValue = formData[idCol] || '';
+                  const isIdError = validationError && validationError.includes(`numero ${idCol}`);
+                  return (
+                    <div key={idCol} className="flex flex-col gap-2">
+                      <label className="text-[11px] font-black uppercase tracking-widest text-neutral-400 px-1">{idCol}</label>
+                      <input
+                        type="number"
+                        value={idValue}
+                        onChange={(e) => setFormData(prev => ({ ...prev, [idCol]: e.target.value }))}
+                        className={`w-full px-4 py-3 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 transition-all outline-none ${
+                          isIdError
+                            ? 'bg-red-50 dark:bg-red-900/20 border-2 border-red-500 focus:bg-white dark:focus:bg-neutral-800 ring-4 ring-red-500/10'
+                            : 'bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 focus:bg-white dark:focus:bg-neutral-800'
+                        }`}
+                        placeholder={`Inserisci ${idCol.toLowerCase()}...`}
+                      />
+                    </div>
+                  );
+                })()}
+
+                {dynamicCols.filter(col => {
+                  const idCol = dynamicCols.find(c => c.toUpperCase().includes('NUMERO') && c.toUpperCase().includes('CHECKLIST'))
+                    || dynamicCols.find(c => c.toUpperCase().includes('SERIALE'))
+                    || dynamicCols[0];
+                  return col !== idCol;
+                }).map(col => {
                   const val = formData[col];
                   const isMulti = isMultiEntryValue(val);
                   return (

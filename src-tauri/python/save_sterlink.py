@@ -94,6 +94,7 @@ def main():
             raise ValueError("Colonna 'NUMERO CHECKLIST' o 'SERIALE' non trovata nel file")
 
     # Mappa dei valori ID esistenti -> numero riga nel foglio
+    # Gestisce i duplicati: tiene solo la prima occorrenza per ogni ID
     existing_keys = {}
     example_row = None
     for r_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=False), start=2):
@@ -101,14 +102,15 @@ def main():
             key_cell = row[id_col_idx-1]
             if key_cell.value is not None:
                 key_val = key_cell.value
-                # Normalize numeric IDs
                 if isinstance(key_val, float) and key_val.is_integer():
                     key_val = int(key_val)
                 key_str = str(key_val).strip()
                 if key_str:
-                    existing_keys[key_str] = r_idx
-                    if example_row is None:
-                        example_row = row
+                    # Se l'ID esiste già, questa è un duplicato - la saltiamo
+                    if key_str not in existing_keys:
+                        existing_keys[key_str] = r_idx
+                        if example_row is None:
+                            example_row = row
 
     # Trova il nome esatto della colonna ID nelle dynamic_cols
     id_col_name = next((col for col in dynamic_cols if 'NUMERO' in col.upper() and 'CHECKLIST' in col.upper()), None)
@@ -140,15 +142,21 @@ def main():
         id_val = row.get(id_col_name) if id_col_name else None
         if isinstance(id_val, float) and id_val.is_integer():
             id_val = int(id_val)
-        
+
         target_row = None
         key_str = str(id_val).strip() if id_val is not None else None
-        
+
         if key_str and key_str in existing_keys:
             r = existing_keys[key_str]
+            # Prima cancella tutte le celle della riga
             for col in dynamic_cols:
                 if col in col_map:
-                    ws.cell(row=r, column=col_map[col], value=row.get(col))
+                    ws.cell(row=r, column=col_map[col]).value = None
+            # Poi scrivi i nuovi valori (anche None/null vengono scritti come celle vuote)
+            for col in dynamic_cols:
+                if col in col_map:
+                    val = row.get(col)
+                    ws.cell(row=r, column=col_map[col], value=val)
             target_row = ws[r]
         else:
             # Nuova riga - inseriscila correttamente nella tabella se esiste, altrimenti alla fine del foglio
@@ -226,8 +234,36 @@ def main():
             if hasattr(table, 'autoFilter') and table.autoFilter:
                 table.autoFilter.ref = table.ref
 
-    # Riordina le righe dati per NUMERO CHECKLIST (crescente) prima di salvare
-    # Questo risolve il problema delle nuove righe aggiunte in fondo al file
+    # Salva valori E formattazione di ogni riga
+    def get_cell_data(cell):
+        """Estrae valore e formattazione da una cella."""
+        return {
+            'value': cell.value,
+            'font': cell.font.copy() if cell.font else None,
+            'fill': cell.fill.copy() if cell.fill and cell.fill.fill_type else None,
+            'border': cell.border.copy() if cell.border else None,
+            'alignment': cell.alignment.copy() if cell.alignment else None,
+            'number_format': cell.number_format,
+            'protection': cell.protection.copy() if cell.protection else None,
+        }
+    
+    def apply_cell_data(target_cell, cell_data):
+        """Applica valore e formattazione a una cella."""
+        target_cell.value = cell_data['value']
+        if cell_data['font']:
+            target_cell.font = cell_data['font']
+        if cell_data['fill']:
+            target_cell.fill = cell_data['fill']
+        if cell_data['border']:
+            target_cell.border = cell_data['border']
+        if cell_data['alignment']:
+            target_cell.alignment = cell_data['alignment']
+        target_cell.number_format = cell_data['number_format']
+        if cell_data['protection']:
+            target_cell.protection = cell_data['protection']
+    
+    # Raccogli righe uniche: gestisce duplicati tenendo solo la prima occorrenza
+    seen_ids = set()
     rows_with_data = []
     for r_idx in range(2, ws.max_row + 1):
         row_vals = [ws.cell(row=r_idx, column=c).value for c in range(1, ws.max_column + 1)]
@@ -235,13 +271,22 @@ def main():
             id_val = ws.cell(row=r_idx, column=id_col_idx).value
             if isinstance(id_val, float) and id_val.is_integer():
                 id_val = int(id_val)
-            rows_with_data.append((id_val, r_idx, row_vals))
+            id_key = str(id_val).strip() if id_val is not None else ''
+            
+            # Salta duplicati: usa solo la prima occorrenza di ogni ID
+            if id_key and id_key in seen_ids:
+                continue
+            if id_key:
+                seen_ids.add(id_key)
+            
+            cell_datas = [get_cell_data(ws.cell(row=r_idx, column=c)) for c in range(1, ws.max_column + 1)]
+            rows_with_data.append((id_val, r_idx, row_vals, cell_datas))
     
     # Ordina per ID (crescente), mettendo le righe senza ID in fondo
     def sort_key(item):
         id_val = item[0]
         if id_val is None or str(id_val).strip() == '':
-            return (1, 0)  # Metti righe senza ID in fondo
+            return (1, 0)
         try:
             return (0, int(id_val))
         except (ValueError, TypeError):
@@ -249,13 +294,10 @@ def main():
     
     rows_with_data.sort(key=sort_key)
     
-    # Leggi le intestazioni per mantenerle
-    header_vals = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
-    
-    # Copia i dati riordinati
-    for target_r_idx, (_, source_r_idx, row_vals) in enumerate(rows_with_data, start=2):
-        for c_idx, val in enumerate(row_vals, start=1):
-            ws.cell(row=target_r_idx, column=c_idx).value = val
+    # Copia i dati riordinati (valori + formattazione)
+    for target_r_idx, (_, source_r_idx, row_vals, cell_datas) in enumerate(rows_with_data, start=2):
+        for c_idx, cell_data in enumerate(cell_datas, start=1):
+            apply_cell_data(ws.cell(row=target_r_idx, column=c_idx), cell_data)
     
     # Pulisci righe vuote in fondo
     for r_idx in range(len(rows_with_data) + 2, ws.max_row + 2):
