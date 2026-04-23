@@ -1,5 +1,6 @@
 import { getCalendarEvents, getGoogleSettings, setCalendarEvents, setGoogleSettings, type GoogleCalendarSettings, type CalendarEvent, getGoogleEventMap, setGoogleEventMap } from './storage';
 import { refreshAccessToken, fetchGoogleCalendarEvents, type GoogleTokens } from './googleCalendar';
+import { sendAppNotification } from './notifications';
 
 /**
  * SyncManager coordinates the background synchronization process.
@@ -107,6 +108,8 @@ export async function performSync(settings: GoogleCalendarSettings) {
   const updatedEvents = [...localEvents];
   const updatedEventMap = { ...googleEventMap };
   let hasChanges = false;
+  let newEventsCount = 0;
+  const newEventNames: string[] = [];
 
   // 6. Process Google events -> Add or Update local events
   for (const gEvent of googleEvents) {
@@ -155,6 +158,8 @@ export async function performSync(settings: GoogleCalendarSettings) {
         const newLocalEvent = { ...convertedGEvent, googleEventId: gEvent.id };
         updatedEvents.push(newLocalEvent);
         updatedEventMap[newLocalEvent.id] = gEvent.id;
+        newEventsCount++;
+        newEventNames.push(convertedGEvent.activity);
         hasChanges = true;
       } else {
         // It's a duplicate but not in map - let's map it to avoid future reprocessing
@@ -209,6 +214,16 @@ export async function performSync(settings: GoogleCalendarSettings) {
       lastSync: new Date().toISOString()
     });
     console.log('[SyncManager] Sync completed with changes.');
+    
+    // Send notification for new events from Google
+    if (newEventsCount > 0 && settings.notificationsEnabled) {
+      const eventList = newEventNames.slice(0, 3).join(', ');
+      const moreText = newEventsCount > 3 ? ` e altri ${newEventsCount - 3}` : '';
+      await sendAppNotification(
+        'Nuovi eventi da Google Calendar',
+        `${newEventsCount} nuovo${newEventsCount > 1 ? 'i' : ''} intervento${newEventsCount > 1 ? 'i' : ''} aggiunto${newEventsCount > 1 ? 'i' : ''}: ${eventList}${moreText}`
+      );
+    }
     
     // Dispatch custom event so UI can refresh
     window.dispatchEvent(new CustomEvent('sync-completed'));

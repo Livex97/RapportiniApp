@@ -1017,6 +1017,34 @@ export default function SettingsPage({
                     </button>
                   </div>
 
+                  <div className="flex items-center justify-between p-6 bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-700 rounded-3xl">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all shadow-sm ${googleSettings?.notificationsEnabled ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600' : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-400'}`}>
+                        <LucideIcons.Bell className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-black text-neutral-900 dark:text-white">Notifiche Nuovi Eventi</h4>
+                        <p className={`text-xs font-bold ${googleSettings?.refreshToken ? 'text-blue-600' : 'text-neutral-500'}`}>
+                          {googleSettings?.notificationsEnabled ? 'Notifiche attive' : 'Disattivate'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (googleSettings) {
+                          onGoogleSettingsChange({ ...googleSettings, notificationsEnabled: !googleSettings.notificationsEnabled });
+                        }
+                      }}
+                      className={`relative inline-flex h-7 w-12 items-center rounded-full transition-all focus:outline-none shadow-inner
+                    ${googleSettings?.notificationsEnabled ? 'bg-blue-600' : 'bg-neutral-300 dark:bg-neutral-700'}`}
+                    >
+                      <span
+                        className={`inline-block h-5 w-5 transform rounded-full bg-white transition-all shadow-md
+                      ${googleSettings?.notificationsEnabled ? 'translate-x-6' : 'translate-x-1'}`}
+                      />
+                    </button>
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest ml-1">Google Client ID</label>

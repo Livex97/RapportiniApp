@@ -321,6 +321,7 @@ export interface GoogleCalendarSettings {
     refreshToken?: string;
     expiryDate?: number;
     lastSync?: string;
+    notificationsEnabled?: boolean;
 }
 
 export const DEFAULT_GOOGLE_SETTINGS: GoogleCalendarSettings = {
